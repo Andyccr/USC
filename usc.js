@@ -552,8 +552,26 @@
             printMsg("stopped");
             return;
           }
-          printMsg("fetch failed: " + (err && err.message ? err.message : "error"), "err");
+          var message = err && err.message ? err.message : "error";
+          printMsg("fetch failed: " + message, "err");
           printMsg(abs, "", abs);
+          var stub = Browser.markdownToDocument(
+            "Title: " +
+              abs +
+              "\nURL Source: " +
+              abs +
+              "\n\nMarkdown Content:\nfetch failed: " +
+              message +
+              "\n\n[" +
+              abs +
+              "](" +
+              abs +
+              ")\n\nreal  opens this URL in a normal browser\n",
+            abs
+          );
+          stub.via = "error";
+          stub.raw = "";
+          setCurrent(stub, nav || "push");
         });
     }
 

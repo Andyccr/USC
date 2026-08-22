@@ -58,6 +58,14 @@ assert.strictEqual(
   "https://example.com"
 );
 assert.strictEqual(
+  Browser.normalizeUrl("example.com", "https://usc.local/"),
+  "https://example.com"
+);
+assert.strictEqual(
+  Browser.normalizeUrl("/x", "https://ex.com/a/b"),
+  "https://ex.com/x"
+);
+assert.strictEqual(
   Browser.resolveUrl("/x", "https://ex.com/a/b"),
   "https://ex.com/x"
 );

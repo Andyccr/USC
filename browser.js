@@ -68,14 +68,16 @@
   function normalizeUrl(text, base) {
     var s = String(text || "").trim();
     if (!s) return "";
+    if (/^https?:\/\//i.test(s)) return s;
+    if (/^\/\//.test(s)) return "https:" + s;
+    if (looksLikeUrl(s) && s.charAt(0) !== "/" && s.charAt(0) !== "?" && s.charAt(0) !== "#") {
+      return "https://" + s.replace(/^https?:\/\//i, "");
+    }
     if (base) {
       try {
         return new URL(s, base).href;
       } catch (e) {}
     }
-    if (/^https?:\/\//i.test(s)) return s;
-    if (/^\/\//.test(s)) return "https:" + s;
-    if (looksLikeUrl(s)) return "https://" + s.replace(/^https?:\/\//i, "");
     return s;
   }
 
