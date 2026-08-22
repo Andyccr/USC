@@ -311,6 +311,7 @@
     var proxyMode = storageGet(PROXY_KEY, "off") === "on" ? "on" : "off";
     var abortCtrl = null;
     var findQuery = "";
+    var findMatches = 0;
     var cache = {};
     var cacheOrder = [];
     var going = 0;
@@ -405,7 +406,8 @@
         host = new URL(current.url).host.replace(/^www\./, "");
       } catch (e) {}
       if (current.url.indexOf("usc.local/search") >= 0) host = "search";
-      var bits = [host];
+      var bits = [current.title || host];
+      if (current.title && current.title !== host) bits.push(host);
       if (current.links && current.links.length) bits.push(String(current.links.length));
       if (view !== "page") bits.push(view);
       if (imagesMode === "on") bits.push("img");
@@ -425,6 +427,7 @@
       var from = 0;
       var at;
       while ((at = lower.indexOf(needle, from)) >= 0) {
+        findMatches += 1;
         if (at > from) parent.appendChild(doc.createTextNode(text.slice(from, at)));
         var mark = doc.createElement("span");
         mark.className = "find";
@@ -517,6 +520,7 @@
     }
 
     function paint() {
+      findMatches = 0;
       var home = current && current.url === "https://usc.local/" && view === "page";
       if (doc.body && doc.body.classList) doc.body.classList.toggle("home", !!home);
       if (home) {
@@ -880,10 +884,9 @@
         findQuery = cmd.query;
         view = "page";
         paint();
-        printMsg("find " + findQuery);
+        printMsg(findMatches + (findMatches === 1 ? " match" : " matches"));
         var hit = page.querySelector(".find");
         if (hit && hit.scrollIntoView) hit.scrollIntoView({ block: "center" });
-        else printMsg("not found");
         return;
       }
       if (cmd.type === "where") {
@@ -937,6 +940,12 @@
         if (!current || !current.url || current.url.indexOf("usc.local") >= 0) {
           printMsg("nothing to bookmark", "err");
           return;
+        }
+        for (var markIndex = 0; markIndex < marks.length; markIndex++) {
+          if (marks[markIndex].url === current.url) {
+            printMsg("already bookmarked");
+            return;
+          }
         }
         marks.push({ title: current.title, url: current.url });
         writeBookmarks(marks);
