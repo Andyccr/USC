@@ -175,7 +175,7 @@
     var chars = 0;
     var pendingBreak = true;
 
-    function pushText(value) {
+    function pushText(value, preserveWhitespace) {
       if (!value) return;
       if (!pre) value = value.replace(/\s+/g, " ");
       if (!value || (!pre && value === " " && pendingBreak)) return;
@@ -529,8 +529,174 @@
     });
   }
 
-  // Recreate htmlToDocument using walkHtml only (first draft helpers kept for title/main).
+  function domToDocument(html, baseUrl) {
+    var parsed = new DOMParser().parseFromString(String(html || ""), "text/html");
+    var baseNode = parsed.querySelector("base[href]");
+    var effectiveBase = baseNode
+      ? resolveUrl(baseNode.getAttribute("href"), baseUrl)
+      : baseUrl;
+    var root =
+      parsed.querySelector("main, article, #mw-content-text, [role='main']") ||
+      parsed.body ||
+      parsed.documentElement;
+    var tokens = [];
+    var links = [];
+    var images = [];
+    var linkMap = {};
+    var chars = 0;
+    var pendingBreak = true;
+    var truncated = false;
+
+    function pushText(value) {
+      if (chars >= MAX_CHARS) {
+        truncated = true;
+        return;
+      }
+      var text = String(value || "");
+      if (!preserveWhitespace) text = text.replace(/\s+/g, " ");
+      if (!text || (text === " " && pendingBreak)) return;
+      var room = MAX_CHARS - chars;
+      if (text.length > room) {
+        text = text.slice(0, room);
+        truncated = true;
+      }
+      tokens.push({ t: "text", v: text });
+      chars += text.length;
+      pendingBreak = false;
+    }
+
+    function pushBreak() {
+      if (pendingBreak) return;
+      tokens.push({ t: "nl" });
+      pendingBreak = true;
+    }
+
+    function addLink(element) {
+      var url = resolveUrl(element.getAttribute("href") || "", effectiveBase);
+      var text = (element.textContent || "").replace(/\s+/g, " ").trim();
+      if (links.length >= MAX_LINKS) {
+        pushText(text);
+        return;
+      }
+      if (!text || !isSafeHttpUrl(url)) {
+        pushText(text);
+        return;
+      }
+      if (chars + text.length > MAX_CHARS) {
+        pushText(text);
+        return;
+      }
+      var key = url + "\n" + text;
+      var n = linkMap[key];
+      if (!n) {
+        n = links.length + 1;
+        linkMap[key] = n;
+        links.push({ n: n, text: text, url: url });
+      }
+      tokens.push({ t: "link", n: n, v: text, url: url });
+      chars += text.length;
+      pendingBreak = false;
+    }
+
+    function addImage(element) {
+      if (images.length >= MAX_IMAGES) return;
+      var attrs = {
+        src: element.getAttribute("src") || "",
+        "data-src": element.getAttribute("data-src") || "",
+        srcset: element.getAttribute("srcset") || ""
+      };
+      var src = srcFromAttrs(attrs, effectiveBase);
+      var width = parseInt(element.getAttribute("width"), 10) || element.width || 0;
+      var height = parseInt(element.getAttribute("height"), 10) || element.height || 0;
+      if (!isSafeHttpUrl(src) || (width === 1 && height === 1)) return;
+      var alt = (element.getAttribute("alt") || element.getAttribute("title") || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      var n = images.length + 1;
+      images.push({ n: n, alt: alt, url: src, loaded: false });
+      tokens.push({ t: "img", n: n, alt: alt, url: src });
+      pendingBreak = false;
+    }
+
+    function walk(node, inPre) {
+      if (!node || truncated) return;
+      if (node.nodeType === 3) {
+        var value = node.nodeValue || "";
+        pushText(value, inPre);
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      var name = node.tagName.toLowerCase();
+      if (
+        SKIP[name] ||
+        node.hasAttribute("hidden") ||
+        node.getAttribute("aria-hidden") === "true"
+      ) {
+        return;
+      }
+      if (name === "br") {
+        pushBreak();
+        return;
+      }
+      if (name === "hr") {
+        pushBreak();
+        pushText("-----");
+        pushBreak();
+        return;
+      }
+      if (name === "img") {
+        addImage(node);
+        return;
+      }
+      if (name === "a") {
+        var nestedImages = node.querySelectorAll("img");
+        for (var imageIndex = 0; imageIndex < nestedImages.length; imageIndex++) {
+          addImage(nestedImages[imageIndex]);
+        }
+        addLink(node);
+        return;
+      }
+      var block = !!BLOCK[name];
+      if (block) {
+        pushBreak();
+        if (/^h[1-6]$/.test(name)) {
+          pushText("######".slice(0, parseInt(name.charAt(1), 10)) + " ");
+        } else if (name === "li") {
+          pushText("* ");
+        } else if (name === "blockquote") {
+          pushText("| ");
+        }
+      }
+      for (var child = node.firstChild; child; child = child.nextSibling) {
+        walk(child, inPre || name === "pre");
+        if (truncated) break;
+      }
+      if (block) pushBreak();
+    }
+
+    walk(root, false);
+    if (truncated) {
+      pushBreak();
+      tokens.push({ t: "text", v: "[page truncated]" });
+    }
+    return {
+      title: (parsed.title || "").replace(/\s+/g, " ").trim() || hostOf(baseUrl) || "untitled",
+      url: baseUrl || "",
+      tokens: tokens,
+      links: links,
+      images: images,
+      truncated: truncated
+    };
+  }
+
   function htmlToDocument(html, baseUrl) {
+    if (typeof DOMParser !== "undefined") {
+      try {
+        return domToDocument(html, baseUrl);
+      } catch (e) {
+        // Keep the small tokenizer as a fallback for old browsers and malformed input.
+      }
+    }
     var title = extractTitle(html);
     var body = extractMainHtml(html);
     var baseMatch = String(html || "").match(/<base\b[^>]*\bhref\s*=\s*["']([^"']+)["']/i);
