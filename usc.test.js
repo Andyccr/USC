@@ -28,6 +28,11 @@ assert.deepStrictEqual(USC.parseLine("i think"), {
 assert.deepStrictEqual(USC.parseLine("i 1"), { type: "img", which: 1 });
 assert.deepStrictEqual(USC.parseLine("i on"), { type: "images", mode: "on" });
 assert.deepStrictEqual(USC.parseLine(":back"), { type: "back" });
+assert.deepStrictEqual(USC.parseLine("s back"), {
+  type: "search",
+  engines: ["google", "bing", "baidu"],
+  query: "back"
+});
 assert.deepStrictEqual(USC.parseLine("g 量子计算"), {
   type: "search",
   engines: ["google"],
@@ -150,4 +155,37 @@ assert.deepStrictEqual(
   ["hello", "hellotalk"]
 );
 
-console.log("ok");
+var originalFetch = global.fetch;
+
+(async function () {
+  var calls = 0;
+  global.fetch = function () {
+    calls += 1;
+    var err = new Error("aborted");
+    err.name = "AbortError";
+    return Promise.reject(err);
+  };
+  await assert.rejects(Browser.fetchPage("https://example.com"), function (err) {
+    return err.name === "AbortError";
+  });
+  assert.strictEqual(calls, 1, "abort must not fall through to Jina");
+
+  global.fetch = function () {
+    return Promise.resolve({
+      ok: true,
+      url: "https://example.com/pic.png",
+      headers: { get: function () { return "image/png"; } }
+    });
+  };
+  var imagePage = await Browser.fetchPage("https://example.com/pic.png");
+  var imageDoc = Browser.parseFetched(imagePage.text, imagePage.url);
+  assert.strictEqual(imagePage.via, "direct-image");
+  assert.strictEqual(imageDoc.images.length, 1);
+
+  global.fetch = originalFetch;
+  console.log("ok");
+})().catch(function (err) {
+  global.fetch = originalFetch;
+  console.error(err);
+  process.exit(1);
+});

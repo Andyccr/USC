@@ -461,16 +461,41 @@
     if (!isSafeHttpUrl(abs)) {
       return Promise.reject(new Error("blocked url"));
     }
-    return fetchDirect(abs, signal).catch(function () {
-      return fetchJina(abs, signal, "html");
-    }).catch(function () {
-      return fetchJina(abs, signal, "markdown");
-    });
+    return fetchDirect(abs, signal)
+      .catch(function (err) {
+        if (err && err.name === "AbortError") throw err;
+        return fetchJina(abs, signal, "html");
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") throw err;
+        return fetchJina(abs, signal, "markdown");
+      });
   }
 
   function fetchDirect(url, signal) {
     return fetch(url, { signal: signal, credentials: "omit" }).then(function (res) {
       if (!res.ok) throw new Error("http " + res.status);
+      var type = (res.headers.get("content-type") || "").toLowerCase();
+      if (type.indexOf("image/") === 0) {
+        var imageUrl = res.url || url;
+        return {
+          url: imageUrl,
+          text:
+            "<html><head><title>image</title></head><body><img src=\"" +
+            imageUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;") +
+            "\" alt=\"image\"></body></html>",
+          via: "direct-image"
+        };
+      }
+      if (
+        type &&
+        type.indexOf("text/") !== 0 &&
+        type.indexOf("json") < 0 &&
+        type.indexOf("xml") < 0 &&
+        type.indexOf("html") < 0
+      ) {
+        throw new Error("unsupported " + type.split(";")[0]);
+      }
       return res.text().then(function (text) {
         if (!text) throw new Error("empty");
         return { url: res.url || url, text: text, via: "direct" };
