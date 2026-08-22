@@ -28,6 +28,11 @@ assert.deepStrictEqual(USC.parseLine("i think"), {
 assert.deepStrictEqual(USC.parseLine("i 1"), { type: "img", which: 1 });
 assert.deepStrictEqual(USC.parseLine("i on"), { type: "images", mode: "on" });
 assert.deepStrictEqual(USC.parseLine(":back"), { type: "back" });
+assert.deepStrictEqual(USC.parseLine("s back"), {
+  type: "search",
+  engines: ["google", "bing", "baidu"],
+  query: "back"
+});
 assert.deepStrictEqual(USC.parseLine("g 量子计算"), {
   type: "search",
   engines: ["google"],
@@ -62,6 +67,7 @@ assert.deepStrictEqual(USC.parseLine("back"), { type: "back" });
 assert.deepStrictEqual(USC.parseLine("img 4"), { type: "img", which: 4 });
 assert.deepStrictEqual(USC.parseLine("img all"), { type: "img", which: "all" });
 assert.deepStrictEqual(USC.parseLine("images on"), { type: "images", mode: "on" });
+assert.deepStrictEqual(USC.parseLine("proxy on"), { type: "proxy", mode: "on" });
 assert.deepStrictEqual(USC.parseLine("find lynx"), { type: "find", query: "lynx" });
 
 assert.strictEqual(Browser.looksLikeUrl("example.com"), true);
@@ -115,6 +121,20 @@ assert.ok(plain.indexOf("[img:1 cat]") >= 0);
 assert.ok(plain.indexOf("evil") < 0);
 assert.ok(plain.indexOf("skip me") < 0);
 
+var based = Browser.htmlToDocument(
+  '<html><head><base href="/assets/"></head><body><a href="next">next</a><img src="pic.png"></body></html>',
+  "https://ex.com/path/page"
+);
+assert.strictEqual(based.links[0].url, "https://ex.com/assets/next");
+assert.strictEqual(based.images[0].url, "https://ex.com/assets/pic.png");
+
+var longDoc = Browser.htmlToDocument(
+  "<html><body>" + "<p>xxxxxxxxxx</p>".repeat(13000) + "</body></html>",
+  "https://ex.com/"
+);
+assert.strictEqual(longDoc.truncated, true);
+assert.ok(Browser.pageToPlainText(longDoc).indexOf("[page truncated]") >= 0);
+
 var md = Browser.markdownToDocument(
   "Title: Demo\nURL Source: https://ex.com/\n\nMarkdown Content:\nHello [there](/a)\n![pic](img.png)\n",
   "https://ex.com/"
@@ -150,4 +170,45 @@ assert.deepStrictEqual(
   ["hello", "hellotalk"]
 );
 
-console.log("ok");
+var originalFetch = global.fetch;
+
+(async function () {
+  var calls = 0;
+  global.fetch = function () {
+    calls += 1;
+    var err = new Error("aborted");
+    err.name = "AbortError";
+    return Promise.reject(err);
+  };
+  await assert.rejects(Browser.fetchPage("https://example.com"), function (err) {
+    return err.name === "AbortError";
+  });
+  assert.strictEqual(calls, 1, "abort must not fall through to Jina");
+
+  calls = 0;
+  global.fetch = function () {
+    calls += 1;
+    return Promise.reject(new TypeError("cors"));
+  };
+  await assert.rejects(Browser.fetchPage("https://example.com"), /proxy on/);
+  assert.strictEqual(calls, 1, "proxy must be opt-in");
+
+  global.fetch = function () {
+    return Promise.resolve({
+      ok: true,
+      url: "https://example.com/pic.png",
+      headers: { get: function () { return "image/png"; } }
+    });
+  };
+  var imagePage = await Browser.fetchPage("https://example.com/pic.png");
+  var imageDoc = Browser.parseFetched(imagePage.text, imagePage.url);
+  assert.strictEqual(imagePage.via, "direct-image");
+  assert.strictEqual(imageDoc.images.length, 1);
+
+  global.fetch = originalFetch;
+  console.log("ok");
+})().catch(function (err) {
+  global.fetch = originalFetch;
+  console.error(err);
+  process.exit(1);
+});

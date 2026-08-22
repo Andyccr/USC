@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#141413">
+  <meta name="color-scheme" content="dark">
   <title>USC</title>
   <style>
     :root {
@@ -59,7 +61,15 @@
       border-bottom: 1px solid var(--line);
     }
     #page a.ln:hover { border-bottom-color: var(--fg); }
-    #page .imgph { color: var(--dim); }
+    #page .imgph {
+      color: var(--dim);
+      background: transparent;
+      border: 0;
+      padding: 0;
+      font: inherit;
+      cursor: pointer;
+    }
+    #page button.imgph:hover { color: var(--fg); }
     #page img.pic {
       display: block;
       max-width: min(100%, 520px);
@@ -130,12 +140,12 @@
 <body class="home">
   <section id="page" aria-label="page"></section>
   <div id="chrome">
-    <div id="status"></div>
+    <div id="status" aria-live="polite"></div>
     <div id="msg" aria-live="polite"></div>
-    <div id="hint"></div>
+    <div id="hint" role="status"></div>
     <form id="prompt" autocomplete="off">
       <label for="q">›</label>
-      <input id="q" type="text" placeholder="search or url" spellcheck="false" autocapitalize="off" autocorrect="off" autofocus>
+      <input id="q" type="text" placeholder="search or url" aria-label="Search or URL" aria-describedby="hint" spellcheck="false" autocapitalize="off" autocorrect="off" autofocus>
     </form>
   </div>
   <noscript>USC 需要 JavaScript。</noscript>

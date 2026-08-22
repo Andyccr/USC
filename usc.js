@@ -10,8 +10,12 @@
   var SUGGEST_LIMIT = 8;
   var JSONP_TIMEOUT = 5000;
   var MAX_STACK = 40;
+  var MAX_CACHE = 20;
+  var MAX_RAW = 2000000;
+  var LOAD_TIMEOUT = 15000;
   var BOOKMARK_KEY = "usc.bookmarks";
   var IMAGE_KEY = "usc.images";
+  var PROXY_KEY = "usc.proxy";
 
   var ENGINES = {
     google: {
@@ -75,7 +79,9 @@
     "back     home     help\n" +
     "i 1      load image 1\n" +
     "i on     always load images\n" +
+    "proxy on  allow Jina fallback\n" +
     "g hello  google only\n" +
+    "s back   search a command word\n" +
     ":cmd     any command\n";
 
   function listFrom(value) {
@@ -113,6 +119,7 @@
     if (lower === "bookmark") return { type: "bookmark", index: 0 };
     if (lower === "save") return { type: "save" };
     if (lower === "real") return { type: "real", index: 0 };
+    if (lower === "proxy") return { type: "proxy", mode: "show" };
     if (/^\d+$/.test(text)) return { type: "follow", index: parseInt(text, 10) };
 
     var parts = text.split(/\s+/);
@@ -124,7 +131,10 @@
       if (/^\d+$/.test(rest)) return { type: "follow", index: parseInt(rest, 10) };
       return { type: "go", url: rest };
     }
-    if (head === "img" || head === "i") {
+    if (head === "proxy") {
+      if (rest === "on" || rest === "off") return { type: "proxy", mode: rest };
+      return { type: "usage", message: "proxy on|off" };
+    } else if (head === "img" || head === "i") {
       if (!rest) return { type: "images", mode: "show" };
       if (rest === "on" || rest === "off") return { type: "images", mode: rest };
       if (rest === "all") return { type: "img", which: "all" };
@@ -141,8 +151,8 @@
     } else if (head === "unbookmark") {
       if (!/^\d+$/.test(rest)) return { type: "usage", message: "unbookmark <n>" };
       return { type: "unbookmark", index: parseInt(rest, 10) };
-    } else if (head === "all") {
-      if (!rest) return { type: "search", engines: ALL.slice(), query: "all" };
+    } else if (head === "all" || head === "s" || head === "search") {
+      if (!rest) return { type: "search", engines: ALL.slice(), query: head };
       return { type: "search", engines: ALL.slice(), query: rest };
     } else {
       for (var name in ENGINES) {
@@ -231,6 +241,20 @@
     document.body.removeChild(a);
   }
 
+  function isSearchEngineUrl(url) {
+    try {
+      var host = new URL(url).hostname.replace(/^www\./, "");
+      return (
+        host === "google.com" ||
+        host === "bing.com" ||
+        host === "baidu.com" ||
+        /\.google\.[a-z.]+$/i.test(host)
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
   function storageGet(key, fallback) {
     try {
       var raw = localStorage.getItem(key);
@@ -273,6 +297,7 @@
     var hint = doc.getElementById("hint");
     var form = doc.getElementById("prompt");
     var input = doc.getElementById("q");
+    var promptLabel = form && form.querySelector("label");
     if (!page || !status || !msg || !form || !input) return;
 
     var cmdHistory = [];
@@ -283,15 +308,27 @@
     var current = null;
     var view = "page";
     var imagesMode = storageGet(IMAGE_KEY, "off") === "on" ? "on" : "off";
+    var proxyMode = storageGet(PROXY_KEY, "off") === "on" ? "on" : "off";
     var abortCtrl = null;
     var findQuery = "";
     var cache = {};
+    var cacheOrder = [];
     var going = 0;
     var suggestTimer = null;
     var tabComplete = "";
+    var suggestionWords = [];
+    var suggestionIndex = -1;
+    var historySeq = 0;
+    var nativeHistory =
+      typeof window !== "undefined" && window.history && window.history.pushState;
 
     function setStatus(text) {
       status.textContent = text;
+    }
+
+    function setLoading(active) {
+      if (promptLabel) promptLabel.textContent = active ? "…" : "›";
+      if (page) page.setAttribute("aria-busy", active ? "true" : "false");
     }
 
     function printMsg(text, className, href) {
@@ -318,6 +355,39 @@
       if (hint) hint.textContent = text || "";
     }
 
+    function clearSuggestions() {
+      suggestionWords = [];
+      suggestionIndex = -1;
+      tabComplete = "";
+      setHint("");
+    }
+
+    function renderSuggestions() {
+      var words = suggestionWords.slice(0, 6);
+      setHint(
+        words
+          .map(function (word, index) {
+            return (index === suggestionIndex ? "› " : "") + word;
+          })
+          .join("    ")
+      );
+    }
+
+    function cachePut(url, fetched) {
+      if (!url) return;
+      if (!cache[url]) cacheOrder.push(url);
+      cache[url] = fetched;
+      while (cacheOrder.length > MAX_CACHE) {
+        delete cache[cacheOrder.shift()];
+      }
+    }
+
+    function cancelPending() {
+      going += 1;
+      if (abortCtrl) abortCtrl.abort();
+      setLoading(false);
+    }
+
     function applyImageMode(documentModel) {
       if (!documentModel || !documentModel.images) return;
       for (var i = 0; i < documentModel.images.length; i++) {
@@ -339,6 +409,8 @@
       if (current.links && current.links.length) bits.push(String(current.links.length));
       if (view !== "page") bits.push(view);
       if (imagesMode === "on") bits.push("img");
+      if (current.via && current.via.indexOf("jina-") === 0) bits.push("via jina");
+      if (current.truncated) bits.push("cut");
       setStatus(bits.join("    "));
     }
 
@@ -402,12 +474,26 @@
             var img = doc.createElement("img");
             img.className = "pic";
             img.alt = tok.alt || "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.onerror = (function (image, imageLabel, imageNumber) {
+              return function () {
+                imageLabel.textContent += " failed";
+                image.remove();
+                if (documentModel.images[imageNumber - 1]) {
+                  documentModel.images[imageNumber - 1].loaded = false;
+                }
+              };
+            })(img, label, tok.n);
             img.src = tok.url;
             page.appendChild(img);
             page.appendChild(doc.createTextNode("\n"));
           } else {
-            var ph = doc.createElement("span");
+            var ph = doc.createElement("button");
+            ph.type = "button";
             ph.className = "imgph";
+            ph.setAttribute("data-image", String(tok.n));
+            ph.setAttribute("aria-label", "Load image " + tok.n);
             ph.textContent = "[img:" + tok.n + (tok.alt ? " " + tok.alt : "") + "]";
             page.appendChild(ph);
           }
@@ -480,18 +566,44 @@
     function setCurrent(documentModel, nav) {
       current = documentModel;
       view = "page";
-      if (nav === "replace") {
+      findQuery = "";
+      if (nav === "initial") {
+        stack = [documentModel];
+        stackPos = 0;
+        documentModel._historySeq = historySeq;
+        if (nativeHistory) {
+          window.history.replaceState({ usc: true, seq: historySeq }, "", window.location.pathname);
+        }
+      } else if (nav === "replace") {
+        var replaceSeq =
+          stackPos >= 0 && stack[stackPos]._historySeq != null
+            ? stack[stackPos]._historySeq
+            : historySeq;
         if (stackPos >= 0) stack[stackPos] = documentModel;
         else {
           stack.push(documentModel);
           stackPos = 0;
         }
+        stack[stackPos]._historySeq = replaceSeq;
+        if (nativeHistory) {
+          window.history.replaceState(
+            { usc: true, seq: stack[stackPos]._historySeq },
+            "",
+            "#usc-" + stack[stackPos]._historySeq
+          );
+        }
       } else if (nav === "push") {
         stack = stack.slice(0, stackPos + 1);
+        historySeq += 1;
+        documentModel._historySeq = historySeq;
         stack.push(documentModel);
         if (stack.length > MAX_STACK) stack.shift();
         stackPos = stack.length - 1;
+        if (nativeHistory) {
+          window.history.pushState({ usc: true, seq: historySeq }, "", "#usc-" + historySeq);
+        }
       }
+      if (documentModel.title) doc.title = documentModel.title + " · USC";
       paint();
     }
 
@@ -507,35 +619,53 @@
         return;
       }
       if (abs === "https://usc.local/") {
+        cancelPending();
         setCurrent(homeDocument(), nav || "push");
         return;
       }
       if (abortCtrl) abortCtrl.abort();
-      abortCtrl = typeof AbortController === "function" ? new AbortController() : null;
+      var controller = typeof AbortController === "function" ? new AbortController() : null;
+      abortCtrl = controller;
       var ticket = ++going;
+      var timedOut = false;
+      var loadTimer = setTimeout(function () {
+        timedOut = true;
+        if (controller) controller.abort();
+      }, LOAD_TIMEOUT);
+      setLoading(true);
       setStatus(abs.replace(/^https?:\/\//, ""));
       msg.textContent = "";
       var hit = cache[abs];
       var req = hit
         ? Promise.resolve(hit)
-        : Browser.fetchPage(abs, { signal: abortCtrl && abortCtrl.signal });
+        : Browser.fetchPage(abs, {
+            signal: controller && controller.signal,
+            proxy: proxyMode === "on"
+          });
       req
         .then(function (fetched) {
+          clearTimeout(loadTimer);
           if (ticket !== going) return;
-          cache[fetched.url || abs] = fetched;
-          var documentModel = Browser.parseFetched(fetched.text, fetched.url || abs);
-          documentModel.raw = fetched.text;
+          setLoading(false);
+          var raw = fetched.text.slice(0, MAX_RAW);
+          var stored = { url: fetched.url || abs, text: raw, via: fetched.via };
+          cachePut(abs, stored);
+          cachePut(stored.url, stored);
+          var documentModel = Browser.parseFetched(raw, fetched.url || abs);
+          documentModel.raw = raw;
           documentModel.via = fetched.via;
           applyImageMode(documentModel);
           setCurrent(documentModel, nav || "push");
         })
         .catch(function (err) {
+          clearTimeout(loadTimer);
           if (ticket !== going) return;
-          if (err && err.name === "AbortError") {
+          setLoading(false);
+          if (err && err.name === "AbortError" && !timedOut) {
             printMsg("stopped");
             return;
           }
-          var message = err && err.message ? err.message : "error";
+          var message = timedOut ? "timeout" : err && err.message ? err.message : "error";
           printMsg("fetch failed: " + message, "err");
           printMsg(abs, "", abs);
           var stub = Browser.markdownToDocument(
@@ -560,10 +690,15 @@
 
     function follow(index) {
       if (!current || !current.links[index - 1]) {
-        printMsg("no such link", "err");
+        showSearchHub(String(index));
         return;
       }
-      go(current.links[index - 1].url, "push");
+      var target = current.links[index - 1].url;
+      if (isSearchEngineUrl(target)) {
+        openExternal(target);
+        return;
+      }
+      go(target, "push");
     }
 
     function loadImages(which) {
@@ -585,20 +720,25 @@
       }
     }
 
-    function showSearchHub(query) {
+    function showSearchHub(query, selectedEngines) {
+      cancelPending();
+      var ticket = ++going;
+      var engines = selectedEngines || ALL;
       var md =
         "Title: " +
         query +
         "\nURL Source: https://usc.local/search\n\nMarkdown Content:\n" +
         query +
         "\n\n";
-      for (var i = 0; i < ALL.length; i++) {
-        var name = ALL[i];
+      for (var i = 0; i < engines.length; i++) {
+        var name = engines[i];
         md += "[" + name + "](" + ENGINES[name].searchUrl(query) + ")\n";
       }
       var documentModel = Browser.markdownToDocument(md, "https://usc.local/search");
       setCurrent(documentModel, "push");
-      suggestMany(ALL, query).then(function (results) {
+      var hubPos = stackPos;
+      suggestMany(engines, query).then(function (results) {
+        if (ticket !== going || current !== documentModel || stack[hubPos] !== documentModel) return;
         var extra = "\n";
         for (var r = 0; r < results.length; r++) {
           extra += "\n" + results[r].name + "\n";
@@ -614,27 +754,20 @@
         }
         var merged = Browser.markdownToDocument(md + extra, "https://usc.local/search");
         merged.via = "suggest";
+        merged._historySeq = documentModel._historySeq;
         current = merged;
-        stack[stackPos] = merged;
+        stack[hubPos] = merged;
         if (view === "page") paint();
       });
     }
 
     function runSearch(cmd) {
-      if (cmd.engines.length === 1) {
-        go(ENGINES[cmd.engines[0]].searchUrl(cmd.query), "push");
-        suggestMany(cmd.engines, cmd.query).then(function (results) {
-          var row = results[0];
-          if (!row) return;
-          if (row.error) printMsg(row.error, "err");
-        });
-        return;
-      }
-      showSearchHub(cmd.query);
+      showSearchHub(cmd.query, cmd.engines);
     }
 
     function handle(cmd, line) {
       if (cmd.type === "help") {
+        cancelPending();
         view = "help";
         paint();
         return;
@@ -648,6 +781,7 @@
         return;
       }
       if (cmd.type === "home") {
+        cancelPending();
         setCurrent(homeDocument(), "push");
         return;
       }
@@ -660,8 +794,13 @@
         return;
       }
       if (cmd.type === "back") {
+        cancelPending();
         if (stackPos <= 0) {
           printMsg("no back");
+          return;
+        }
+        if (nativeHistory) {
+          window.history.back();
           return;
         }
         stackPos -= 1;
@@ -671,8 +810,13 @@
         return;
       }
       if (cmd.type === "forward") {
+        cancelPending();
         if (stackPos >= stack.length - 1) {
           printMsg("no forward");
+          return;
+        }
+        if (nativeHistory) {
+          window.history.forward();
           return;
         }
         stackPos += 1;
@@ -691,8 +835,7 @@
         return;
       }
       if (cmd.type === "stop") {
-        going += 1;
-        if (abortCtrl) abortCtrl.abort();
+        cancelPending();
         printMsg("stopped");
         return;
       }
@@ -713,6 +856,20 @@
         view = "imgs";
         paint();
         printMsg("images " + imagesMode + "  ·  img <n> to load one");
+        return;
+      }
+      if (cmd.type === "proxy") {
+        if (cmd.mode === "on" || cmd.mode === "off") {
+          proxyMode = cmd.mode;
+          storageSet(PROXY_KEY, proxyMode);
+          printMsg(
+            proxyMode === "on"
+              ? "proxy on · failed pages may be sent to r.jina.ai"
+              : "proxy off"
+          );
+        } else {
+          printMsg("proxy " + proxyMode);
+        }
         return;
       }
       if (cmd.type === "img") {
@@ -820,27 +977,27 @@
         cmdPos = cmdHistory.length;
         draft = "";
       }
-      setHint("");
-      tabComplete = "";
+      clearSuggestions();
       input.value = "";
       handle(cmd, line);
     });
 
     input.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && suggestionIndex >= 0 && tabComplete) {
+        input.value = tabComplete;
+        return;
+      }
       if (event.key === "Tab" && tabComplete) {
         event.preventDefault();
         input.value = tabComplete;
-        setHint("");
-        tabComplete = "";
+        clearSuggestions();
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
         input.value = "";
-        setHint("");
-        tabComplete = "";
-        going += 1;
-        if (abortCtrl) abortCtrl.abort();
+        clearSuggestions();
+        cancelPending();
         return;
       }
       if (!input.value && (event.key === " " || event.key === "PageDown")) {
@@ -855,12 +1012,25 @@
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
+        if (suggestionWords.length) {
+          suggestionIndex =
+            suggestionIndex <= 0 ? Math.min(5, suggestionWords.length - 1) : suggestionIndex - 1;
+          tabComplete = suggestionWords[suggestionIndex] || "";
+          renderSuggestions();
+          return;
+        }
         if (!cmdHistory.length) return;
         if (cmdPos === cmdHistory.length) draft = input.value;
         cmdPos = Math.max(0, cmdPos - 1);
         input.value = cmdHistory[cmdPos];
       } else if (event.key === "ArrowDown") {
         event.preventDefault();
+        if (suggestionWords.length) {
+          suggestionIndex = (suggestionIndex + 1) % Math.min(6, suggestionWords.length);
+          tabComplete = suggestionWords[suggestionIndex] || "";
+          renderSuggestions();
+          return;
+        }
         if (cmdPos < cmdHistory.length) cmdPos += 1;
         input.value = cmdPos === cmdHistory.length ? draft : cmdHistory[cmdPos];
       }
@@ -868,6 +1038,8 @@
 
     input.addEventListener("input", function () {
       var q = input.value.replace(/^\s+|\s+$/g, "");
+      suggestionWords = [];
+      suggestionIndex = -1;
       tabComplete = "";
       if (suggestTimer) clearTimeout(suggestTimer);
       if (!q || parseLine(q).type !== "search") {
@@ -889,19 +1061,47 @@
               }
             }
           }
+          suggestionWords = words;
+          suggestionIndex = -1;
           tabComplete = words[0] || "";
-          setHint(words.slice(0, 6).join("    "));
+          renderSuggestions();
         });
       }, 280);
     });
 
     page.addEventListener("click", function (event) {
+      var imageButton = event.target.closest ? event.target.closest("button[data-image]") : null;
+      if (imageButton) {
+        loadImages(parseInt(imageButton.getAttribute("data-image"), 10));
+        return;
+      }
       var a = event.target.closest ? event.target.closest("a.ln") : null;
       if (!a) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey) return;
       event.preventDefault();
-      go(a.getAttribute("data-url"), "push");
+      var target = a.getAttribute("data-url");
+      if (isSearchEngineUrl(target)) openExternal(target);
+      else go(target, "push");
     });
+
+    if (nativeHistory) {
+      window.addEventListener("popstate", function (event) {
+        cancelPending();
+        var state = event.state;
+        if (!state || !state.usc) return;
+        for (var i = 0; i < stack.length; i++) {
+          if (stack[i]._historySeq === state.seq) {
+            stackPos = i;
+            current = stack[i];
+            view = "page";
+            findQuery = "";
+            if (current.title) doc.title = current.title + " · USC";
+            paint();
+            return;
+          }
+        }
+      });
+    }
 
     doc.addEventListener("click", function (event) {
       var target = event.target;
@@ -909,7 +1109,7 @@
       input.focus();
     });
 
-    setCurrent(homeDocument(), "push");
+    setCurrent(homeDocument(), "initial");
     input.focus();
   }
 
