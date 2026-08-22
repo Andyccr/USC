@@ -1,31 +1,35 @@
 # USC
 
-浏览器内纯文本 CUI。输入查询后调用 Google、Bing、百度的联想接口，并打开对应搜索页。没有自建索引，所以是半搜索引擎。
+浏览器里的纯文本浏览器。无服务器：页面通过直连或 Jina 拉取，再渲染成可跟的编号链接。图片默认不加载，按你的选择再显示。
 
-用浏览器打开 `index.html` 即可，不需要服务器。
+用浏览器打开 `index.html`。
 
 ```
-usc> 量子计算
+usc> example.com
+usc> 1
+usc> img 1
+usc> images on
 usc> g hello
-usc> b hello
-usc> d hello
 usc> help
 ```
 
-Enter 会做三件事：
-
-1. 立刻打开所选引擎的搜索页，并在终端里打印 URL（可点击）
-2. 用 JSONP 向 Google / Bing / 百度请求联想词
-3. 把联想结果打在终端里
-
-浏览器可能拦截多个新标签。被拦时点终端里的 URL。
+提示符为空时，空格 / PageDown / PageUp 滚动当前页。点页面里的 `[n]` 会在本浏览器里打开；Ctrl/Cmd 点击则用系统浏览器。
 
 | 命令 | 作用 |
 |---|---|
-| `<query>` | 三个引擎一起搜 |
-| `g <query>` | 只调 Google |
-| `b <query>` | 只调 Bing |
-| `d <query>` | 只调百度 |
-| `all <query>` | 三个引擎一起搜 |
-| `help` | 命令说明 |
-| `clear` | 清屏 |
+| `go <url>` 或直接输入 URL | 打开页面 |
+| `<n>` / `open <n>` | 跟随第 n 个链接 |
+| `back` / `forward` | 历史 |
+| `reload` / `stop` / `home` | 重载、中止、首页 |
+| `links` / `imgs` / `outline` / `source` / `page` | 切换视图 |
+| `find <text>` | 页内查找 |
+| `images on\|off` | 以后是否自动加载图片 |
+| `img <n>` / `img all` | 加载当前页指定/全部图片 |
+| `<query>` | Google + Bing + 百度 搜索枢纽 |
+| `g\|b\|d <query>` | 在本浏览器打开对应搜索引擎 |
+| `real [n]` | 用系统浏览器打开当前页或链接 n |
+| `bookmark` / `bookmarks` / `unbookmark <n>` | 书签（存在 localStorage） |
+| `save` | 下载当前页为 txt |
+| `help` / `clear` | 帮助 / 清消息 |
+
+没有自建索引。搜索页若被目标站拦截，终端里仍会留下 URL 和联想词。
