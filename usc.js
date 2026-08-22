@@ -68,44 +68,15 @@
   };
 
   var HELP =
-    "USC  pure-text browser\n" +
+    "type to search\n" +
+    "url to open\n" +
+    "number to follow a link\n" +
     "\n" +
-    "open\n" +
-    "  go <url>            open a page\n" +
-    "  <url>               same as go\n" +
-    "  <n>  |  open <n>    follow link n\n" +
-    "  back  |  forward    history\n" +
-    "  reload  |  stop     reload or abort\n" +
-    "  home                start screen\n" +
-    "  real [n]            open current (or link n) in a real browser\n" +
-    "\n" +
-    "page\n" +
-    "  links  |  imgs      list links / images\n" +
-    "  outline | source    headings / raw dump\n" +
-    "  page                back to rendered page\n" +
-    "  find <text>         find in page\n" +
-    "  save                download page as .txt\n" +
-    "  url  |  title       show current location\n" +
-    "  history             session history\n" +
-    "\n" +
-    "images  (off by default)\n" +
-    "  images on|off       auto-load images on later pages\n" +
-    "  img <n>             load image n on this page\n" +
-    "  img all             load every image on this page\n" +
-    "\n" +
-    "search\n" +
-    "  <query>             google + bing + baidu hub\n" +
-    "  g|b|d <query>       open that engine in this browser\n" +
-    "  all <query>         same as a bare query\n" +
-    "\n" +
-    "bookmarks\n" +
-    "  bookmark            save current page\n" +
-    "  bookmarks           list\n" +
-    "  bookmark <n>        open bookmark n\n" +
-    "  unbookmark <n>      remove\n" +
-    "\n" +
-    "  help  |  clear\n" +
-    "  space / pageup / pagedown scroll the page when the prompt is empty\n";
+    "back     home     help\n" +
+    "i 1      load image 1\n" +
+    "i on     always load images\n" +
+    "g hello  google only\n" +
+    ":cmd     any command\n";
 
   function listFrom(value) {
     if (!Array.isArray(value)) return [];
@@ -120,10 +91,11 @@
   function parseLine(line) {
     var text = String(line || "").replace(/^\s+|\s+$/g, "");
     if (!text) return { type: "empty" };
+    if (text.charAt(0) === ":") return parseLine(text.slice(1));
 
     var lower = text.toLowerCase();
-    if (lower === "help" || lower === "?" || lower === ":help") return { type: "help" };
-    if (lower === "clear" || lower === "cls" || lower === ":clear") return { type: "clear" };
+    if (lower === "help" || lower === "?") return { type: "help" };
+    if (lower === "clear" || lower === "cls") return { type: "clear" };
     if (lower === "back") return { type: "back" };
     if (lower === "forward" || lower === "fwd") return { type: "forward" };
     if (lower === "reload" || lower === "refresh") return { type: "reload" };
@@ -148,43 +120,35 @@
     var rest = text.slice(parts[0].length).replace(/^\s+/, "");
 
     if (head === "go" || head === "open" || head === "visit") {
-      if (!rest) return { type: "usage", message: "usage: " + head + " <url|n>" };
+      if (!rest) return { type: "usage", message: "url or number" };
       if (/^\d+$/.test(rest)) return { type: "follow", index: parseInt(rest, 10) };
       return { type: "go", url: rest };
     }
-    if (head === "img") {
+    if (head === "img" || head === "i") {
+      if (!rest) return { type: "images", mode: "show" };
+      if (rest === "on" || rest === "off") return { type: "images", mode: rest };
       if (rest === "all") return { type: "img", which: "all" };
       if (/^\d+$/.test(rest)) return { type: "img", which: parseInt(rest, 10) };
-      return { type: "usage", message: "usage: img <n|all>" };
-    }
-    if (head === "images") {
+    } else if (head === "images") {
       if (rest === "on" || rest === "off") return { type: "images", mode: rest };
-      return { type: "usage", message: "usage: images [on|off]" };
-    }
-    if (head === "find" || head === "/") {
-      if (!rest) return { type: "usage", message: "usage: find <text>" };
+    } else if (head === "find" || head === "/") {
+      if (!rest) return { type: "usage", message: "find <text>" };
       return { type: "find", query: rest };
-    }
-    if (head === "real") {
-      if (/^\d+$/.test(rest)) return { type: "real", index: parseInt(rest, 10) };
-      return { type: "usage", message: "usage: real [n]" };
-    }
-    if (head === "bookmark") {
-      if (/^\d+$/.test(rest)) return { type: "bookmark", index: parseInt(rest, 10) };
-      return { type: "usage", message: "usage: bookmark [n]" };
-    }
-    if (head === "unbookmark") {
-      if (!/^\d+$/.test(rest)) return { type: "usage", message: "usage: unbookmark <n>" };
+    } else if (head === "real" && /^\d+$/.test(rest)) {
+      return { type: "real", index: parseInt(rest, 10) };
+    } else if (head === "bookmark" && /^\d+$/.test(rest)) {
+      return { type: "bookmark", index: parseInt(rest, 10) };
+    } else if (head === "unbookmark") {
+      if (!/^\d+$/.test(rest)) return { type: "usage", message: "unbookmark <n>" };
       return { type: "unbookmark", index: parseInt(rest, 10) };
-    }
-    if (head === "all") {
-      if (!rest) return { type: "usage", message: "usage: all <query>" };
+    } else if (head === "all") {
+      if (!rest) return { type: "search", engines: ALL.slice(), query: "all" };
       return { type: "search", engines: ALL.slice(), query: rest };
-    }
-    for (var name in ENGINES) {
-      if (ENGINES[name].aliases.indexOf(head) !== -1) {
-        if (!rest) return { type: "usage", message: "usage: " + head + " <query>" };
-        return { type: "search", engines: [name], query: rest };
+    } else {
+      for (var name in ENGINES) {
+        if (ENGINES[name].aliases.indexOf(head) !== -1 && rest) {
+          return { type: "search", engines: [name], query: rest };
+        }
       }
     }
     if (Browser.looksLikeUrl(text)) return { type: "go", url: text };
@@ -297,13 +261,7 @@
 
   function homeDocument() {
     return Browser.markdownToDocument(
-      "Title: USC\nURL Source: https://usc.local/\n\nMarkdown Content:\n" +
-        "# USC\n" +
-        "pure-text browser  ·  google · bing · baidu\n\n" +
-        "type a URL, a query, or help\n" +
-        "images are off until you say otherwise\n\n" +
-        "[example.com](https://example.com/)\n" +
-        "[Wikipedia / Lynx](https://en.wikipedia.org/wiki/Lynx_(web_browser))\n",
+      "Title: USC\nURL Source: https://usc.local/\n\nMarkdown Content:\nUSC\n",
       "https://usc.local/"
     );
   }
@@ -312,6 +270,7 @@
     var page = doc.getElementById("page");
     var status = doc.getElementById("status");
     var msg = doc.getElementById("msg");
+    var hint = doc.getElementById("hint");
     var form = doc.getElementById("prompt");
     var input = doc.getElementById("q");
     if (!page || !status || !msg || !form || !input) return;
@@ -328,6 +287,8 @@
     var findQuery = "";
     var cache = {};
     var going = 0;
+    var suggestTimer = null;
+    var tabComplete = "";
 
     function setStatus(text) {
       status.textContent = text;
@@ -353,8 +314,8 @@
       msg.scrollTop = msg.scrollHeight;
     }
 
-    function echo(line) {
-      printMsg("usc> " + line);
+    function setHint(text) {
+      if (hint) hint.textContent = text || "";
     }
 
     function applyImageMode(documentModel) {
@@ -365,19 +326,20 @@
     }
 
     function paintStatus() {
-      if (!current) {
-        setStatus("usc  ·  img:" + imagesMode);
+      if (!current || current.url === "https://usc.local/") {
+        setStatus("");
         return;
       }
-      var bits = [
-        current.url || "",
-        current.title || "",
-        current.links.length + " links",
-        current.images.length + " images",
-        "img:" + imagesMode
-      ];
-      if (view !== "page") bits.push("view:" + view);
-      setStatus(bits.filter(Boolean).join("  ·  "));
+      var host = current.url;
+      try {
+        host = new URL(current.url).host.replace(/^www\./, "");
+      } catch (e) {}
+      if (current.url.indexOf("usc.local/search") >= 0) host = "search";
+      var bits = [host];
+      if (current.links && current.links.length) bits.push(String(current.links.length));
+      if (view !== "page") bits.push(view);
+      if (imagesMode === "on") bits.push("img");
+      setStatus(bits.join("    "));
     }
 
     function appendFindText(parent, text) {
@@ -454,7 +416,28 @@
       page.scrollTop = 0;
     }
 
+    function paintHome() {
+      page.textContent = "";
+      var wrap = doc.createElement("div");
+      var mark = doc.createElement("div");
+      mark.className = "mark";
+      mark.textContent = "USC";
+      var hintLine = doc.createElement("div");
+      hintLine.className = "hint";
+      hintLine.textContent = "search or url";
+      wrap.appendChild(mark);
+      wrap.appendChild(hintLine);
+      page.appendChild(wrap);
+    }
+
     function paint() {
+      var home = current && current.url === "https://usc.local/" && view === "page";
+      if (doc.body && doc.body.classList) doc.body.classList.toggle("home", !!home);
+      if (home) {
+        paintHome();
+        paintStatus();
+        return;
+      }
       if (view === "help") {
         paintTextView(HELP);
       } else if (!current) {
@@ -530,7 +513,8 @@
       if (abortCtrl) abortCtrl.abort();
       abortCtrl = typeof AbortController === "function" ? new AbortController() : null;
       var ticket = ++going;
-      printMsg("loading " + abs + " …");
+      setStatus(abs.replace(/^https?:\/\//, ""));
+      msg.textContent = "";
       var hit = cache[abs];
       var req = hit
         ? Promise.resolve(hit)
@@ -544,7 +528,6 @@
           documentModel.via = fetched.via;
           applyImageMode(documentModel);
           setCurrent(documentModel, nav || "push");
-          printMsg((documentModel.title || abs) + "  via " + fetched.via);
         })
         .catch(function (err) {
           if (ticket !== going) return;
@@ -604,9 +587,9 @@
 
     function showSearchHub(query) {
       var md =
-        "Title: search " +
+        "Title: " +
         query +
-        "\nURL Source: https://usc.local/search\n\nMarkdown Content:\n# search  " +
+        "\nURL Source: https://usc.local/search\n\nMarkdown Content:\n" +
         query +
         "\n\n";
       for (var i = 0; i < ALL.length; i++) {
@@ -616,12 +599,17 @@
       var documentModel = Browser.markdownToDocument(md, "https://usc.local/search");
       setCurrent(documentModel, "push");
       suggestMany(ALL, query).then(function (results) {
-        var extra = "\n## suggest\n";
+        var extra = "\n";
         for (var r = 0; r < results.length; r++) {
           extra += "\n" + results[r].name + "\n";
-          if (results[r].error) extra += "(" + results[r].error + ")\n";
           for (var j = 0; j < results[r].suggestions.length; j++) {
-            extra += "* " + results[r].suggestions[j] + "\n";
+            var word = results[r].suggestions[j];
+            extra +=
+              "[" +
+              word +
+              "](" +
+              ENGINES[results[r].name].searchUrl(word) +
+              ")\n";
           }
         }
         var merged = Browser.markdownToDocument(md + extra, "https://usc.local/search");
@@ -638,8 +626,7 @@
         suggestMany(cmd.engines, cmd.query).then(function (results) {
           var row = results[0];
           if (!row) return;
-          if (row.error) printMsg(row.name + ": " + row.error, "err");
-          for (var j = 0; j < row.suggestions.length; j++) printMsg("  " + row.suggestions[j]);
+          if (row.error) printMsg(row.error, "err");
         });
         return;
       }
@@ -832,13 +819,30 @@
         cmdHistory.push(line);
         cmdPos = cmdHistory.length;
         draft = "";
-        echo(line);
       }
+      setHint("");
+      tabComplete = "";
       input.value = "";
       handle(cmd, line);
     });
 
     input.addEventListener("keydown", function (event) {
+      if (event.key === "Tab" && tabComplete) {
+        event.preventDefault();
+        input.value = tabComplete;
+        setHint("");
+        tabComplete = "";
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        input.value = "";
+        setHint("");
+        tabComplete = "";
+        going += 1;
+        if (abortCtrl) abortCtrl.abort();
+        return;
+      }
       if (!input.value && (event.key === " " || event.key === "PageDown")) {
         event.preventDefault();
         page.scrollBy(0, Math.round(page.clientHeight * 0.9));
@@ -860,6 +864,35 @@
         if (cmdPos < cmdHistory.length) cmdPos += 1;
         input.value = cmdPos === cmdHistory.length ? draft : cmdHistory[cmdPos];
       }
+    });
+
+    input.addEventListener("input", function () {
+      var q = input.value.replace(/^\s+|\s+$/g, "");
+      tabComplete = "";
+      if (suggestTimer) clearTimeout(suggestTimer);
+      if (!q || parseLine(q).type !== "search") {
+        setHint("");
+        return;
+      }
+      suggestTimer = setTimeout(function () {
+        suggestMany(ALL, q).then(function (results) {
+          if (input.value.replace(/^\s+|\s+$/g, "") !== q) return;
+          var seen = {};
+          var words = [];
+          for (var r = 0; r < results.length; r++) {
+            var list = results[r].suggestions || [];
+            for (var j = 0; j < list.length; j++) {
+              var w = list[j];
+              if (w && !seen[w]) {
+                seen[w] = 1;
+                words.push(w);
+              }
+            }
+          }
+          tabComplete = words[0] || "";
+          setHint(words.slice(0, 6).join("    "));
+        });
+      }, 280);
     });
 
     page.addEventListener("click", function (event) {
