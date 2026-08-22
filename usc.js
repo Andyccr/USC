@@ -235,9 +235,9 @@
       ]);
     }
 
-    function runSearch(cmd) {
+    function runSearch(cmd, line) {
       var ticket = ++pending;
-      printLine("usc> " + cmd.query);
+      printLine("usc> " + line);
       printLine("open", "muted");
       for (var i = 0; i < cmd.engines.length; i++) {
         var name = cmd.engines[i];
@@ -283,7 +283,7 @@
       } else if (cmd.type === "usage") {
         printLine(cmd.message, "muted");
       } else if (cmd.type === "search") {
-        runSearch(cmd);
+        runSearch(cmd, line);
       }
     });
 
