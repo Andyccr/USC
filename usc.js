@@ -754,6 +754,7 @@
         }
         var merged = Browser.markdownToDocument(md + extra, "https://usc.local/search");
         merged.via = "suggest";
+        merged._historySeq = documentModel._historySeq;
         current = merged;
         stack[hubPos] = merged;
         if (view === "page") paint();
