@@ -68,6 +68,13 @@ assert.deepStrictEqual(USC.parseLine("img 4"), { type: "img", which: 4 });
 assert.deepStrictEqual(USC.parseLine("img all"), { type: "img", which: "all" });
 assert.deepStrictEqual(USC.parseLine("images on"), { type: "images", mode: "on" });
 assert.deepStrictEqual(USC.parseLine("proxy on"), { type: "proxy", mode: "on" });
+assert.deepStrictEqual(USC.parseLine("theme light"), { type: "theme", mode: "light" });
+assert.deepStrictEqual(USC.parseLine("font +"), { type: "font", value: "+" });
+assert.deepStrictEqual(USC.parseLine("font 18"), { type: "font", value: "18" });
+assert.deepStrictEqual(USC.parseLine("copy"), { type: "copy", index: 0 });
+assert.deepStrictEqual(USC.parseLine("copy 3"), { type: "copy", index: 3 });
+assert.deepStrictEqual(USC.parseLine("share"), { type: "share" });
+assert.deepStrictEqual(USC.parseLine("top"), { type: "scroll", edge: "top" });
 assert.deepStrictEqual(USC.parseLine("find lynx"), { type: "find", query: "lynx" });
 
 assert.strictEqual(Browser.looksLikeUrl("example.com"), true);

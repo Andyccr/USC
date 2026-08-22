@@ -16,6 +16,35 @@
   var BOOKMARK_KEY = "usc.bookmarks";
   var IMAGE_KEY = "usc.images";
   var PROXY_KEY = "usc.proxy";
+  var THEME_KEY = "usc.theme";
+  var FONT_KEY = "usc.font";
+  var COMMANDS = [
+    ":back",
+    ":forward",
+    ":home",
+    ":reload",
+    ":stop",
+    ":find ",
+    ":links",
+    ":images",
+    ":i ",
+    ":bookmark",
+    ":bookmarks",
+    ":copy",
+    ":share",
+    ":save",
+    ":top",
+    ":bottom",
+    ":theme dark",
+    ":theme light",
+    ":theme system",
+    ":font +",
+    ":font -",
+    ":font reset",
+    ":proxy on",
+    ":proxy off",
+    ":help"
+  ];
 
   var ENGINES = {
     google: {
@@ -80,6 +109,10 @@
     "i 1      load image 1\n" +
     "i on     always load images\n" +
     "proxy on  allow Jina fallback\n" +
+    "theme     dark / light / system\n" +
+    "font +    adjust text size\n" +
+    "copy      copy current URL\n" +
+    "share     share current page\n" +
     "g hello  google only\n" +
     "s back   search a command word\n" +
     ":cmd     any command\n";
@@ -120,6 +153,12 @@
     if (lower === "save") return { type: "save" };
     if (lower === "real") return { type: "real", index: 0 };
     if (lower === "proxy") return { type: "proxy", mode: "show" };
+    if (lower === "theme") return { type: "theme", mode: "show" };
+    if (lower === "font") return { type: "font", value: "show" };
+    if (lower === "copy") return { type: "copy", index: 0 };
+    if (lower === "share") return { type: "share" };
+    if (lower === "top") return { type: "scroll", edge: "top" };
+    if (lower === "bottom") return { type: "scroll", edge: "bottom" };
     if (/^\d+$/.test(text)) return { type: "follow", index: parseInt(text, 10) };
 
     var parts = text.split(/\s+/);
@@ -131,7 +170,21 @@
       if (/^\d+$/.test(rest)) return { type: "follow", index: parseInt(rest, 10) };
       return { type: "go", url: rest };
     }
-    if (head === "proxy") {
+    if (head === "theme") {
+      if (rest === "dark" || rest === "light" || rest === "system") {
+        return { type: "theme", mode: rest };
+      }
+      return { type: "usage", message: "theme dark|light|system" };
+    } else if (head === "font") {
+      if (rest === "+" || rest === "-" || rest === "reset" || /^\d{2}$/.test(rest)) {
+        return { type: "font", value: rest };
+      }
+      return { type: "usage", message: "font +|-|reset|12..20" };
+    } else if (head === "copy") {
+      if (!rest) return { type: "copy", index: 0 };
+      if (/^\d+$/.test(rest)) return { type: "copy", index: parseInt(rest, 10) };
+      return { type: "usage", message: "copy [n]" };
+    } else if (head === "proxy") {
       if (rest === "on" || rest === "off") return { type: "proxy", mode: rest };
       return { type: "usage", message: "proxy on|off" };
     } else if (head === "img" || head === "i") {
@@ -295,6 +348,7 @@
     var status = doc.getElementById("status");
     var msg = doc.getElementById("msg");
     var hint = doc.getElementById("hint");
+    var progress = doc.querySelector("#progress span");
     var form = doc.getElementById("prompt");
     var input = doc.getElementById("q");
     var promptLabel = form && form.querySelector("label");
@@ -309,6 +363,10 @@
     var view = "page";
     var imagesMode = storageGet(IMAGE_KEY, "off") === "on" ? "on" : "off";
     var proxyMode = storageGet(PROXY_KEY, "off") === "on" ? "on" : "off";
+    var themeMode = storageGet(THEME_KEY, "system");
+    var fontSize = parseInt(storageGet(FONT_KEY, "15"), 10);
+    if (themeMode !== "dark" && themeMode !== "light") themeMode = "system";
+    if (!fontSize || fontSize < 12 || fontSize > 20) fontSize = 15;
     var abortCtrl = null;
     var findQuery = "";
     var findMatches = 0;
@@ -325,6 +383,28 @@
 
     function setStatus(text) {
       status.textContent = text;
+    }
+
+    function applyAppearance() {
+      if (themeMode === "system") doc.documentElement.removeAttribute("data-theme");
+      else doc.documentElement.setAttribute("data-theme", themeMode);
+      doc.documentElement.style.setProperty("--font-size", fontSize + "px");
+      var themeMeta = doc.querySelector('meta[name="theme-color"]');
+      if (themeMeta) {
+        var light =
+          themeMode === "light" ||
+          (themeMode === "system" &&
+            typeof matchMedia === "function" &&
+            matchMedia("(prefers-color-scheme: light)").matches);
+        themeMeta.setAttribute("content", light ? "#f2f0e9" : "#141413");
+      }
+    }
+
+    function updateProgress() {
+      if (!progress) return;
+      var max = page.scrollHeight - page.clientHeight;
+      var percent = max > 0 ? Math.round((page.scrollTop / max) * 100) : 0;
+      progress.style.width = Math.max(0, Math.min(100, percent)) + "%";
     }
 
     function setLoading(active) {
@@ -354,6 +434,30 @@
 
     function setHint(text) {
       if (hint) hint.textContent = text || "";
+    }
+
+    function copyText(text) {
+      if (!text) return Promise.reject(new Error("nothing to copy"));
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function (resolve, reject) {
+        var area = doc.createElement("textarea");
+        area.value = text;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        doc.body.appendChild(area);
+        area.select();
+        try {
+          if (!doc.execCommand("copy")) throw new Error("copy failed");
+          resolve();
+        } catch (e) {
+          reject(e);
+        } finally {
+          area.remove();
+        }
+      });
     }
 
     function clearSuggestions() {
@@ -526,6 +630,7 @@
       if (home) {
         paintHome();
         paintStatus();
+        updateProgress();
         return;
       }
       if (view === "help") {
@@ -565,6 +670,7 @@
         paintDoc(current);
       }
       paintStatus();
+      updateProgress();
     }
 
     function setCurrent(documentModel, nav) {
@@ -876,6 +982,72 @@
         }
         return;
       }
+      if (cmd.type === "theme") {
+        if (cmd.mode === "dark" || cmd.mode === "light" || cmd.mode === "system") {
+          themeMode = cmd.mode;
+          storageSet(THEME_KEY, themeMode);
+          applyAppearance();
+        }
+        printMsg("theme " + themeMode);
+        return;
+      }
+      if (cmd.type === "font") {
+        if (cmd.value === "+") fontSize += 1;
+        else if (cmd.value === "-") fontSize -= 1;
+        else if (cmd.value === "reset") fontSize = 15;
+        else if (/^\d{2}$/.test(cmd.value)) fontSize = parseInt(cmd.value, 10);
+        fontSize = Math.max(12, Math.min(20, fontSize));
+        storageSet(FONT_KEY, String(fontSize));
+        applyAppearance();
+        printMsg("font " + fontSize);
+        return;
+      }
+      if (cmd.type === "copy") {
+        var copyTarget = current && current.url;
+        if (cmd.index) {
+          copyTarget =
+            current && current.links[cmd.index - 1] && current.links[cmd.index - 1].url;
+        }
+        if (!copyTarget || copyTarget.indexOf("usc.local") >= 0) {
+          printMsg("nothing to copy", "err");
+          return;
+        }
+        copyText(copyTarget)
+          .then(function () {
+            printMsg("copied");
+          })
+          .catch(function () {
+            printMsg("copy failed", "err");
+          });
+        return;
+      }
+      if (cmd.type === "share") {
+        var shareUrl = current && current.url;
+        if (!shareUrl || shareUrl.indexOf("usc.local") >= 0) {
+          printMsg("nothing to share", "err");
+          return;
+        }
+        if (navigator.share) {
+          navigator
+            .share({ title: current.title || "USC", url: shareUrl })
+            .catch(function (err) {
+              if (!err || err.name !== "AbortError") printMsg("share failed", "err");
+            });
+        } else {
+          copyText(shareUrl)
+            .then(function () {
+              printMsg("share unavailable · URL copied");
+            })
+            .catch(function () {
+              printMsg("share unavailable", "err");
+            });
+        }
+        return;
+      }
+      if (cmd.type === "scroll") {
+        page.scrollTo({ top: cmd.edge === "top" ? 0 : page.scrollHeight, behavior: "smooth" });
+        return;
+      }
       if (cmd.type === "img") {
         loadImages(cmd.which);
         return;
@@ -1051,6 +1223,15 @@
       suggestionIndex = -1;
       tabComplete = "";
       if (suggestTimer) clearTimeout(suggestTimer);
+      if (q.charAt(0) === ":") {
+        var commandQuery = q.toLowerCase();
+        suggestionWords = COMMANDS.filter(function (command) {
+          return command.indexOf(commandQuery) === 0;
+        });
+        tabComplete = suggestionWords[0] || "";
+        renderSuggestions();
+        return;
+      }
       if (!q || parseLine(q).type !== "search") {
         setHint("");
         return;
@@ -1118,6 +1299,38 @@
       input.focus();
     });
 
+    page.addEventListener("scroll", updateProgress, { passive: true });
+
+    doc.addEventListener("keydown", function (event) {
+      if ((event.ctrlKey || event.metaKey) && (event.key === "l" || event.key === "k")) {
+        event.preventDefault();
+        input.focus();
+        input.select();
+        return;
+      }
+      if (event.altKey && event.key === "ArrowLeft") {
+        event.preventDefault();
+        handle({ type: "back" }, "back");
+        return;
+      }
+      if (event.altKey && event.key === "ArrowRight") {
+        event.preventDefault();
+        handle({ type: "forward" }, "forward");
+        return;
+      }
+      if (
+        event.key === "/" &&
+        event.target !== input &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        input.focus();
+      }
+    });
+
+    applyAppearance();
     setCurrent(homeDocument(), "initial");
     input.focus();
   }
