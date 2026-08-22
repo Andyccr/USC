@@ -15,6 +15,7 @@
   var LOAD_TIMEOUT = 15000;
   var BOOKMARK_KEY = "usc.bookmarks";
   var IMAGE_KEY = "usc.images";
+  var PROXY_KEY = "usc.proxy";
 
   var ENGINES = {
     google: {
@@ -78,6 +79,7 @@
     "back     home     help\n" +
     "i 1      load image 1\n" +
     "i on     always load images\n" +
+    "proxy on  allow Jina fallback\n" +
     "g hello  google only\n" +
     "s back   search a command word\n" +
     ":cmd     any command\n";
@@ -117,6 +119,7 @@
     if (lower === "bookmark") return { type: "bookmark", index: 0 };
     if (lower === "save") return { type: "save" };
     if (lower === "real") return { type: "real", index: 0 };
+    if (lower === "proxy") return { type: "proxy", mode: "show" };
     if (/^\d+$/.test(text)) return { type: "follow", index: parseInt(text, 10) };
 
     var parts = text.split(/\s+/);
@@ -128,7 +131,10 @@
       if (/^\d+$/.test(rest)) return { type: "follow", index: parseInt(rest, 10) };
       return { type: "go", url: rest };
     }
-    if (head === "img" || head === "i") {
+    if (head === "proxy") {
+      if (rest === "on" || rest === "off") return { type: "proxy", mode: rest };
+      return { type: "usage", message: "proxy on|off" };
+    } else if (head === "img" || head === "i") {
       if (!rest) return { type: "images", mode: "show" };
       if (rest === "on" || rest === "off") return { type: "images", mode: rest };
       if (rest === "all") return { type: "img", which: "all" };
@@ -235,6 +241,20 @@
     document.body.removeChild(a);
   }
 
+  function isSearchEngineUrl(url) {
+    try {
+      var host = new URL(url).hostname.replace(/^www\./, "");
+      return (
+        host === "google.com" ||
+        host === "bing.com" ||
+        host === "baidu.com" ||
+        /\.google\.[a-z.]+$/i.test(host)
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
   function storageGet(key, fallback) {
     try {
       var raw = localStorage.getItem(key);
@@ -288,6 +308,7 @@
     var current = null;
     var view = "page";
     var imagesMode = storageGet(IMAGE_KEY, "off") === "on" ? "on" : "off";
+    var proxyMode = storageGet(PROXY_KEY, "off") === "on" ? "on" : "off";
     var abortCtrl = null;
     var findQuery = "";
     var cache = {};
@@ -297,6 +318,9 @@
     var tabComplete = "";
     var suggestionWords = [];
     var suggestionIndex = -1;
+    var historySeq = 0;
+    var nativeHistory =
+      typeof window !== "undefined" && window.history && window.history.pushState;
 
     function setStatus(text) {
       status.textContent = text;
@@ -385,6 +409,8 @@
       if (current.links && current.links.length) bits.push(String(current.links.length));
       if (view !== "page") bits.push(view);
       if (imagesMode === "on") bits.push("img");
+      if (current.via && current.via.indexOf("jina-") === 0) bits.push("via jina");
+      if (current.truncated) bits.push("cut");
       setStatus(bits.join("    "));
     }
 
@@ -540,18 +566,44 @@
     function setCurrent(documentModel, nav) {
       current = documentModel;
       view = "page";
-      if (nav === "replace") {
+      findQuery = "";
+      if (nav === "initial") {
+        stack = [documentModel];
+        stackPos = 0;
+        documentModel._historySeq = historySeq;
+        if (nativeHistory) {
+          window.history.replaceState({ usc: true, seq: historySeq }, "", window.location.pathname);
+        }
+      } else if (nav === "replace") {
+        var replaceSeq =
+          stackPos >= 0 && stack[stackPos]._historySeq != null
+            ? stack[stackPos]._historySeq
+            : historySeq;
         if (stackPos >= 0) stack[stackPos] = documentModel;
         else {
           stack.push(documentModel);
           stackPos = 0;
         }
+        stack[stackPos]._historySeq = replaceSeq;
+        if (nativeHistory) {
+          window.history.replaceState(
+            { usc: true, seq: stack[stackPos]._historySeq },
+            "",
+            "#usc-" + stack[stackPos]._historySeq
+          );
+        }
       } else if (nav === "push") {
         stack = stack.slice(0, stackPos + 1);
+        historySeq += 1;
+        documentModel._historySeq = historySeq;
         stack.push(documentModel);
         if (stack.length > MAX_STACK) stack.shift();
         stackPos = stack.length - 1;
+        if (nativeHistory) {
+          window.history.pushState({ usc: true, seq: historySeq }, "", "#usc-" + historySeq);
+        }
       }
+      if (documentModel.title) doc.title = documentModel.title + " · USC";
       paint();
     }
 
@@ -586,7 +638,10 @@
       var hit = cache[abs];
       var req = hit
         ? Promise.resolve(hit)
-        : Browser.fetchPage(abs, { signal: controller && controller.signal });
+        : Browser.fetchPage(abs, {
+            signal: controller && controller.signal,
+            proxy: proxyMode === "on"
+          });
       req
         .then(function (fetched) {
           clearTimeout(loadTimer);
@@ -635,10 +690,15 @@
 
     function follow(index) {
       if (!current || !current.links[index - 1]) {
-        printMsg("no such link", "err");
+        showSearchHub(String(index));
         return;
       }
-      go(current.links[index - 1].url, "push");
+      var target = current.links[index - 1].url;
+      if (isSearchEngineUrl(target)) {
+        openExternal(target);
+        return;
+      }
+      go(target, "push");
     }
 
     function loadImages(which) {
@@ -660,23 +720,24 @@
       }
     }
 
-    function showSearchHub(query) {
+    function showSearchHub(query, selectedEngines) {
       cancelPending();
       var ticket = ++going;
+      var engines = selectedEngines || ALL;
       var md =
         "Title: " +
         query +
         "\nURL Source: https://usc.local/search\n\nMarkdown Content:\n" +
         query +
         "\n\n";
-      for (var i = 0; i < ALL.length; i++) {
-        var name = ALL[i];
+      for (var i = 0; i < engines.length; i++) {
+        var name = engines[i];
         md += "[" + name + "](" + ENGINES[name].searchUrl(query) + ")\n";
       }
       var documentModel = Browser.markdownToDocument(md, "https://usc.local/search");
       setCurrent(documentModel, "push");
       var hubPos = stackPos;
-      suggestMany(ALL, query).then(function (results) {
+      suggestMany(engines, query).then(function (results) {
         if (ticket !== going || current !== documentModel || stack[hubPos] !== documentModel) return;
         var extra = "\n";
         for (var r = 0; r < results.length; r++) {
@@ -700,11 +761,7 @@
     }
 
     function runSearch(cmd) {
-      if (cmd.engines.length === 1) {
-        go(ENGINES[cmd.engines[0]].searchUrl(cmd.query), "push");
-        return;
-      }
-      showSearchHub(cmd.query);
+      showSearchHub(cmd.query, cmd.engines);
     }
 
     function handle(cmd, line) {
@@ -741,6 +798,10 @@
           printMsg("no back");
           return;
         }
+        if (nativeHistory) {
+          window.history.back();
+          return;
+        }
         stackPos -= 1;
         current = stack[stackPos];
         view = "page";
@@ -751,6 +812,10 @@
         cancelPending();
         if (stackPos >= stack.length - 1) {
           printMsg("no forward");
+          return;
+        }
+        if (nativeHistory) {
+          window.history.forward();
           return;
         }
         stackPos += 1;
@@ -790,6 +855,20 @@
         view = "imgs";
         paint();
         printMsg("images " + imagesMode + "  ·  img <n> to load one");
+        return;
+      }
+      if (cmd.type === "proxy") {
+        if (cmd.mode === "on" || cmd.mode === "off") {
+          proxyMode = cmd.mode;
+          storageSet(PROXY_KEY, proxyMode);
+          printMsg(
+            proxyMode === "on"
+              ? "proxy on · failed pages may be sent to r.jina.ai"
+              : "proxy off"
+          );
+        } else {
+          printMsg("proxy " + proxyMode);
+        }
         return;
       }
       if (cmd.type === "img") {
@@ -999,8 +1078,29 @@
       if (!a) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey) return;
       event.preventDefault();
-      go(a.getAttribute("data-url"), "push");
+      var target = a.getAttribute("data-url");
+      if (isSearchEngineUrl(target)) openExternal(target);
+      else go(target, "push");
     });
+
+    if (nativeHistory) {
+      window.addEventListener("popstate", function (event) {
+        cancelPending();
+        var state = event.state;
+        if (!state || !state.usc) return;
+        for (var i = 0; i < stack.length; i++) {
+          if (stack[i]._historySeq === state.seq) {
+            stackPos = i;
+            current = stack[i];
+            view = "page";
+            findQuery = "";
+            if (current.title) doc.title = current.title + " · USC";
+            paint();
+            return;
+          }
+        }
+      });
+    }
 
     doc.addEventListener("click", function (event) {
       var target = event.target;
@@ -1008,7 +1108,7 @@
       input.focus();
     });
 
-    setCurrent(homeDocument(), "push");
+    setCurrent(homeDocument(), "initial");
     input.focus();
   }
 

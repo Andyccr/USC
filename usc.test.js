@@ -67,6 +67,7 @@ assert.deepStrictEqual(USC.parseLine("back"), { type: "back" });
 assert.deepStrictEqual(USC.parseLine("img 4"), { type: "img", which: 4 });
 assert.deepStrictEqual(USC.parseLine("img all"), { type: "img", which: "all" });
 assert.deepStrictEqual(USC.parseLine("images on"), { type: "images", mode: "on" });
+assert.deepStrictEqual(USC.parseLine("proxy on"), { type: "proxy", mode: "on" });
 assert.deepStrictEqual(USC.parseLine("find lynx"), { type: "find", query: "lynx" });
 
 assert.strictEqual(Browser.looksLikeUrl("example.com"), true);
@@ -120,6 +121,20 @@ assert.ok(plain.indexOf("[img:1 cat]") >= 0);
 assert.ok(plain.indexOf("evil") < 0);
 assert.ok(plain.indexOf("skip me") < 0);
 
+var based = Browser.htmlToDocument(
+  '<html><head><base href="/assets/"></head><body><a href="next">next</a><img src="pic.png"></body></html>',
+  "https://ex.com/path/page"
+);
+assert.strictEqual(based.links[0].url, "https://ex.com/assets/next");
+assert.strictEqual(based.images[0].url, "https://ex.com/assets/pic.png");
+
+var longDoc = Browser.htmlToDocument(
+  "<html><body>" + "<p>xxxxxxxxxx</p>".repeat(13000) + "</body></html>",
+  "https://ex.com/"
+);
+assert.strictEqual(longDoc.truncated, true);
+assert.ok(Browser.pageToPlainText(longDoc).indexOf("[page truncated]") >= 0);
+
 var md = Browser.markdownToDocument(
   "Title: Demo\nURL Source: https://ex.com/\n\nMarkdown Content:\nHello [there](/a)\n![pic](img.png)\n",
   "https://ex.com/"
@@ -169,6 +184,14 @@ var originalFetch = global.fetch;
     return err.name === "AbortError";
   });
   assert.strictEqual(calls, 1, "abort must not fall through to Jina");
+
+  calls = 0;
+  global.fetch = function () {
+    calls += 1;
+    return Promise.reject(new TypeError("cors"));
+  };
+  await assert.rejects(Browser.fetchPage("https://example.com"), /proxy on/);
+  assert.strictEqual(calls, 1, "proxy must be opt-in");
 
   global.fetch = function () {
     return Promise.resolve({

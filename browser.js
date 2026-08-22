@@ -324,7 +324,11 @@
       var leftover = linkStack.pop();
       addLink(leftover.url, leftover.text);
     }
-    return { tokens: tokens, links: links, images: images };
+    var truncated = chars >= MAX_CHARS && i < body.length;
+    if (truncated) {
+      tokens.push({ t: "nl" }, { t: "text", v: "[page truncated]" });
+    }
+    return { tokens: tokens, links: links, images: images, truncated: truncated };
   }
 
   function finalizeDoc(title, baseUrl, walked) {
@@ -333,7 +337,8 @@
       url: baseUrl || "",
       tokens: walked.tokens,
       links: walked.links,
-      images: walked.images
+      images: walked.images,
+      truncated: !!walked.truncated
     };
   }
 
@@ -464,10 +469,15 @@
     return fetchDirect(abs, signal)
       .catch(function (err) {
         if (err && err.name === "AbortError") throw err;
+        if (!opts.proxy) {
+          var blocked = new Error("cross-origin blocked · type proxy on to use Jina");
+          blocked.proxyDisabled = true;
+          throw blocked;
+        }
         return fetchJina(abs, signal, "html");
       })
       .catch(function (err) {
-        if (err && err.name === "AbortError") throw err;
+        if (err && (err.name === "AbortError" || err.proxyDisabled)) throw err;
         return fetchJina(abs, signal, "markdown");
       });
   }
@@ -523,7 +533,9 @@
   function htmlToDocument(html, baseUrl) {
     var title = extractTitle(html);
     var body = extractMainHtml(html);
-    return finalizeDoc(title, baseUrl, walkHtml(body, baseUrl));
+    var baseMatch = String(html || "").match(/<base\b[^>]*\bhref\s*=\s*["']([^"']+)["']/i);
+    var effectiveBase = baseMatch ? resolveUrl(decodeEntities(baseMatch[1]), baseUrl) : baseUrl;
+    return finalizeDoc(title, baseUrl, walkHtml(body, effectiveBase || baseUrl));
   }
 
   return {
