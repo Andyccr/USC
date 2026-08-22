@@ -6,14 +6,28 @@ assert.deepStrictEqual(USC.parseLine(""), { type: "empty" });
 assert.deepStrictEqual(USC.parseLine("help"), { type: "help" });
 assert.deepStrictEqual(USC.parseLine("clear"), { type: "clear" });
 assert.deepStrictEqual(USC.parseLine("g"), {
-  type: "usage",
-  message: "usage: g <query>"
+  type: "search",
+  engines: ["google", "bing", "baidu"],
+  query: "g"
 });
 assert.deepStrictEqual(USC.parseLine("hello world"), {
   type: "search",
   engines: ["google", "bing", "baidu"],
   query: "hello world"
 });
+assert.deepStrictEqual(USC.parseLine("help me"), {
+  type: "search",
+  engines: ["google", "bing", "baidu"],
+  query: "help me"
+});
+assert.deepStrictEqual(USC.parseLine("i think"), {
+  type: "search",
+  engines: ["google", "bing", "baidu"],
+  query: "i think"
+});
+assert.deepStrictEqual(USC.parseLine("i 1"), { type: "img", which: 1 });
+assert.deepStrictEqual(USC.parseLine("i on"), { type: "images", mode: "on" });
+assert.deepStrictEqual(USC.parseLine(":back"), { type: "back" });
 assert.deepStrictEqual(USC.parseLine("g 量子计算"), {
   type: "search",
   engines: ["google"],
