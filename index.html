@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#141413">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="dark light">
   <title>USC</title>
   <style>
     :root {
@@ -14,6 +14,25 @@
       --line: #2c2b28;
       --err: #c45c4a;
       --find: #3d3828;
+      --font-size: 15px;
+    }
+    :root[data-theme="light"] {
+      --bg: #f2f0e9;
+      --fg: #302f2b;
+      --dim: #817d72;
+      --line: #d8d4c9;
+      --err: #a33f30;
+      --find: #e5dcc0;
+    }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]):not([data-theme="light"]) {
+        --bg: #f2f0e9;
+        --fg: #302f2b;
+        --dim: #817d72;
+        --line: #d8d4c9;
+        --err: #a33f30;
+        --find: #e5dcc0;
+      }
     }
     * { box-sizing: border-box; }
     html, body {
@@ -21,7 +40,7 @@
       height: 100%;
       background: var(--bg);
       color: var(--fg);
-      font: 15px/1.7 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font: var(--font-size)/1.7 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     }
     body {
       display: flex;
@@ -116,6 +135,17 @@
       padding-top: 10px;
       border-top: 1px solid var(--line);
     }
+    #progress {
+      height: 1px;
+      background: transparent;
+    }
+    #progress span {
+      display: block;
+      width: 0;
+      height: 100%;
+      background: var(--dim);
+      transition: width 120ms linear;
+    }
     #prompt label {
       color: var(--dim);
       flex: none;
@@ -143,6 +173,7 @@
     <div id="status" aria-live="polite" aria-atomic="true"></div>
     <div id="msg" aria-live="polite"></div>
     <div id="hint" role="status"></div>
+    <div id="progress" aria-hidden="true"><span></span></div>
     <form id="prompt" autocomplete="off">
       <label for="q">›</label>
       <input id="q" type="text" placeholder="search or url" aria-label="Search or URL" aria-describedby="hint" spellcheck="false" autocapitalize="off" autocorrect="off" autofocus>

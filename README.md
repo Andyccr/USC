@@ -49,8 +49,15 @@ python3 -m http.server 8765
 | `find <词>` | 页内查找并报告匹配数量 |
 | `bookmark` / `bookmarks` | 保存当前页 / 查看书签 |
 | `proxy on` / `proxy off` | 允许 / 禁止 Jina 跨域后备读取 |
+| `theme dark/light/system` | 切换并记住界面主题 |
+| `font +` / `font -` / `font reset` | 调整并记住正文字号 |
+| `copy` / `copy <n>` | 复制当前 URL / 链接 n |
+| `share` | 调用系统分享；不支持时复制 URL |
+| `top` / `bottom` | 跳到页面顶部 / 底部 |
 
-图片占位符 `[img:n]` 也可以直接点击。输入 `help` 可查看大纲、源码、保存文本等其他操作。输入框为空时按空格翻页；`Esc` 清空输入并停止加载。
+输入 `:` 会打开命令联想，继续输入可筛选，使用方向键和 `Tab` 选择。图片占位符 `[img:n]` 也可以直接点击。输入 `help` 可查看大纲、源码、保存文本等其他操作。
+
+输入框为空时按空格翻页；`Esc` 清空输入并停止加载。`Ctrl/Cmd + L` 或 `Ctrl/Cmd + K` 聚焦输入框，`Alt + ←/→` 后退或前进。正文底部的细线显示阅读进度。
 
 ### 跨域与隐私
 
@@ -130,8 +137,15 @@ Normal links open inside USC. Search-engine links open in the system browser. Na
 | `find <text>` | Find text and report the match count |
 | `bookmark` / `bookmarks` | Save the current page / list bookmarks |
 | `proxy on` / `proxy off` | Enable / disable the Jina cross-origin fallback |
+| `theme dark/light/system` | Switch and remember the color theme |
+| `font +` / `font -` / `font reset` | Adjust and remember text size |
+| `copy` / `copy <n>` | Copy the current URL / link n |
+| `share` | Use system sharing, or copy the URL as a fallback |
+| `top` / `bottom` | Jump to the top / bottom |
 
-Image placeholders such as `[img:n]` are clickable. Type `help` for outline, source, text export, and other commands. With an empty prompt, Space scrolls down; `Esc` clears input and stops loading.
+Type `:` to open command suggestions; keep typing to filter, then use arrow keys and `Tab`. Image placeholders such as `[img:n]` are clickable. Type `help` for outline, source, text export, and other commands.
+
+With an empty prompt, Space scrolls down; `Esc` clears input and stops loading. `Ctrl/Cmd + L` or `Ctrl/Cmd + K` focuses the prompt, and `Alt + ←/→` navigates history. The fine line above the prompt shows reading progress.
 
 ### Cross-origin access and privacy
 
