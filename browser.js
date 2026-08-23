@@ -466,6 +466,13 @@
     if (!isSafeHttpUrl(abs)) {
       return Promise.reject(new Error("blocked url"));
     }
+    if (opts.forceProxy) {
+      return fetchJina(abs, signal, opts.format === "html" ? "html" : "markdown").catch(function (err) {
+        if (err && err.name === "AbortError") throw err;
+        if (opts.format === "html") throw err;
+        return fetchJina(abs, signal, "html");
+      });
+    }
     return fetchDirect(abs, signal)
       .catch(function (err) {
         if (err && err.name === "AbortError") throw err;

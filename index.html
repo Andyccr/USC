@@ -2,9 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#141413">
   <meta name="color-scheme" content="dark light">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>USC</title>
   <style>
     :root {
@@ -15,6 +18,13 @@
       --err: #c45c4a;
       --find: #3d3828;
       --font-size: 15px;
+      --pad-x: 28px;
+      --chrome-pad-bottom: 22px;
+      --tap: 44px;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
     }
     :root[data-theme="light"] {
       --bg: #f2f0e9;
@@ -41,20 +51,33 @@
       background: var(--bg);
       color: var(--fg);
       font: var(--font-size)/1.7 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
     }
     body {
       display: flex;
       flex-direction: column;
+      min-height: 100%;
+      min-height: 100dvh;
+      padding:
+        var(--safe-top)
+        var(--safe-right)
+        0
+        var(--safe-left);
+      overflow: hidden;
     }
     #page {
       flex: 1;
       overflow: auto;
-      padding: 40px 28px 20px;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      padding: 40px var(--pad-x) 20px;
       max-width: 72ch;
       width: 100%;
       margin: 0 auto;
       white-space: pre-wrap;
       word-break: break-word;
+      overflow-wrap: anywhere;
     }
     body.home #page {
       display: flex;
@@ -78,8 +101,11 @@
       color: var(--fg);
       text-decoration: none;
       border-bottom: 1px solid var(--line);
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
     }
     #page a.ln:hover { border-bottom-color: var(--fg); }
+    #page a.ln:active { color: var(--dim); }
     #page .imgph {
       color: var(--dim);
       background: transparent;
@@ -87,6 +113,8 @@
       padding: 0;
       font: inherit;
       cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
     }
     #page button.imgph:hover { color: var(--fg); }
     #page img.pic {
@@ -100,10 +128,16 @@
       color: var(--fg);
     }
     #chrome {
+      flex: none;
       max-width: 72ch;
       width: 100%;
       margin: 0 auto;
-      padding: 0 28px 22px;
+      padding:
+        0
+        var(--pad-x)
+        calc(var(--chrome-pad-bottom) + var(--safe-bottom) + var(--keyboard-inset, 0px));
+      background: var(--bg);
+      border-top: 0;
     }
     #status {
       min-height: 1.7em;
@@ -120,20 +154,24 @@
       color: var(--dim);
       white-space: pre-wrap;
       word-break: break-word;
+      overflow-wrap: anywhere;
     }
     #msg a, #hint a {
       color: inherit;
       text-decoration: none;
       border-bottom: 1px solid var(--line);
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
     }
     .err { color: var(--err); }
     #prompt {
       display: flex;
-      align-items: baseline;
+      align-items: center;
       gap: 10px;
       margin-top: 8px;
       padding-top: 10px;
       border-top: 1px solid var(--line);
+      min-height: var(--tap);
     }
     #progress {
       height: 1px;
@@ -149,6 +187,7 @@
     #prompt label {
       color: var(--dim);
       flex: none;
+      line-height: 1;
     }
     #q {
       flex: 1;
@@ -157,13 +196,51 @@
       border: 0;
       color: var(--fg);
       font: inherit;
+      font-size: max(16px, var(--font-size));
       outline: none;
-      padding: 0;
+      padding: 8px 0;
+      border-radius: 0;
+      -webkit-appearance: none;
+      appearance: none;
     }
     #q::placeholder { color: var(--dim); }
     ::selection {
       background: #3a3832;
       color: var(--fg);
+    }
+    @media (max-width: 720px) {
+      :root {
+        --pad-x: 16px;
+        --chrome-pad-bottom: 12px;
+        --font-size: 16px;
+      }
+      #page {
+        padding-top: 24px;
+        padding-bottom: 16px;
+        line-height: 1.65;
+      }
+      #page a.ln {
+        display: inline;
+        line-height: 1.85;
+        padding: 0.15em 0;
+      }
+      #status {
+        font-size: 11px;
+      }
+      body.home #page .mark {
+        font-size: 20px;
+        letter-spacing: 0.22em;
+      }
+      #page img.pic {
+        max-width: 100%;
+      }
+    }
+    @media (pointer: coarse) {
+      #page a.ln,
+      #msg a,
+      #page button.imgph {
+        min-height: 1.6em;
+      }
     }
   </style>
 </head>
@@ -174,9 +251,9 @@
     <div id="msg" aria-live="polite"></div>
     <div id="hint" role="status"></div>
     <div id="progress" aria-hidden="true"><span></span></div>
-    <form id="prompt" autocomplete="off">
+    <form id="prompt" autocomplete="off" action="#">
       <label for="q">›</label>
-      <input id="q" type="text" placeholder="search or url" aria-label="Search or URL" aria-describedby="hint" spellcheck="false" autocapitalize="off" autocorrect="off" autofocus>
+      <input id="q" type="search" inputmode="search" enterkeyhint="search" placeholder="search or url" aria-label="Search or URL" aria-describedby="hint" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" autofocus>
     </form>
   </div>
   <noscript>USC 需要 JavaScript。</noscript>

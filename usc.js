@@ -13,6 +13,7 @@
   var MAX_CACHE = 20;
   var MAX_RAW = 2000000;
   var LOAD_TIMEOUT = 15000;
+  var SEARCH_TIMEOUT = 28000;
   var BOOKMARK_KEY = "usc.bookmarks";
   var IMAGE_KEY = "usc.images";
   var PROXY_KEY = "usc.proxy";
@@ -50,7 +51,7 @@
     google: {
       aliases: ["g", "google"],
       searchUrl: function (q) {
-        return "https://www.google.com/search?q=" + encodeURIComponent(q);
+        return "https://www.google.com/search?q=" + encodeURIComponent(q) + "&hl=zh-CN";
       },
       suggestUrl: function (q, cb) {
         return (
@@ -97,7 +98,41 @@
       parseSuggest: function (data) {
         return listFrom(data && data.s);
       }
+    },
+    duckduckgo: {
+      aliases: ["ddg", "duck"],
+      searchUrl: function (q) {
+        return "https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(q);
+      },
+      suggestUrl: function () {
+        return "";
+      },
+      parseSuggest: function () {
+        return [];
+      }
     }
+  };
+
+  var RESULT_LIMIT = 24;
+  var NOISE_TITLES = {
+    "skip to content": 1,
+    "accessibility feedback": 1,
+    rewards: 1,
+    images: 1,
+    videos: 1,
+    maps: 1,
+    news: 1,
+    shopping: 1,
+    flights: 1,
+    more: 1,
+    tools: 1,
+    all: 1,
+    search: 1,
+    "any time": 1,
+    "open links in new tab": 1,
+    "查看更多": 1,
+    "查看更多相关信息": 1,
+    hao123: 1
   };
 
   var HELP =
@@ -118,7 +153,7 @@
     "real     open outside\n" +
     ":cmd     any command\n" +
     "\n" +
-    "links stay as text inside USC\n";
+    "search stays inside USC as text\n";
 
   function listFrom(value) {
     if (!Array.isArray(value)) return [];
@@ -265,6 +300,13 @@
 
   function suggestOne(name, query) {
     var engine = ENGINES[name];
+    if (!engine || !engine.suggestUrl(query, "cb")) {
+      return Promise.resolve({
+        name: name,
+        suggestions: [],
+        url: engine ? engine.searchUrl(query) : ""
+      });
+    }
     return jsonp(function (cb) {
       return engine.suggestUrl(query, cb);
     }).then(function (data) {
@@ -297,19 +339,294 @@
     document.body.removeChild(a);
   }
 
+  function engineHostKind(host) {
+    host = String(host || "")
+      .replace(/^www\./, "")
+      .toLowerCase();
+    if (/(^|\.)google\./i.test(host)) return "google";
+    if (/(^|\.)bing\./i.test(host)) return "bing";
+    if (/(^|\.)baidu\./i.test(host)) return "baidu";
+    if (/(^|\.)duckduckgo\./i.test(host)) return "duckduckgo";
+    return "";
+  }
+
   function isSearchEngineUrl(url) {
     try {
-      var host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+      return !!engineHostKind(new URL(url).hostname);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function decodeBase64Url(value) {
+    var raw = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+    var pad = (4 - (raw.length % 4)) % 4;
+    while (pad--) raw += "=";
+    try {
+      if (typeof atob === "function") return atob(raw);
+      if (typeof Buffer !== "undefined") return Buffer.from(raw, "base64").toString("utf8");
+    } catch (e) {}
+    return "";
+  }
+
+  function unwrapRedirectUrl(url) {
+    try {
+      var u = new URL(url);
+      var host = u.hostname.replace(/^www\./, "").toLowerCase();
+      if (host.indexOf("duckduckgo.com") >= 0) {
+        var uddg = u.searchParams.get("uddg");
+        if (uddg) return uddg;
+      }
+      if (host.indexOf("bing.com") >= 0) {
+        var bingU = u.searchParams.get("u");
+        if (bingU && bingU.indexOf("a1") === 0) {
+          var decoded = decodeBase64Url(bingU.slice(2));
+          if (/^https?:\/\//i.test(decoded)) return decoded;
+        }
+      }
+      if (host.indexOf("google.") >= 0 || /\.google\./i.test(host)) {
+        var gq = u.searchParams.get("q") || u.searchParams.get("url");
+        if (gq && /^https?:\/\//i.test(gq)) return gq;
+      }
+      return u.href;
+    } catch (e) {
+      return url;
+    }
+  }
+
+  function engineQueryFromUrl(url) {
+    try {
+      var u = new URL(url);
+      var kind = engineHostKind(u.hostname);
+      if (!kind) return "";
+      var path = u.pathname || "";
+      if (kind === "baidu") {
+        if (path.indexOf("/s") !== 0 && path.indexOf("/baidu") !== 0) return "";
+        return u.searchParams.get("wd") || u.searchParams.get("word") || "";
+      }
+      if (kind === "duckduckgo") {
+        if (path.indexOf("/l/") === 0) return "";
+        return u.searchParams.get("q") || "";
+      }
+      if (path.indexOf("/search") !== 0 && path !== "/" && path !== "/url") return "";
+      if (path === "/url") return "";
+      return u.searchParams.get("q") || u.searchParams.get("query") || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function isSearchEngineResultPage(url) {
+    return !!engineQueryFromUrl(url);
+  }
+
+  function isSearchEngineChromeUrl(url) {
+    try {
+      var u = new URL(url);
+      var kind = engineHostKind(u.hostname);
+      if (!kind) return false;
+      if (engineQueryFromUrl(url)) return true;
+      var path = u.pathname || "";
+      if (kind === "bing" && path.indexOf("/ck/") === 0) return true;
+      if (kind === "duckduckgo" && path.indexOf("/l/") === 0) return false;
+      if (kind === "baidu" && (path.indexOf("/link") === 0 || path.indexOf("/baidu.php") === 0)) {
+        return false;
+      }
+      if (kind === "google" && path === "/url") return false;
       return (
-        host === "bing.com" ||
-        host === "baidu.com" ||
-        /(^|\.)google\./i.test(host) ||
-        /(^|\.)bing\./i.test(host) ||
-        /(^|\.)baidu\./i.test(host)
+        path === "/" ||
+        path === "/webhp" ||
+        path.indexOf("/img") === 0 ||
+        path.indexOf("/maps") === 0 ||
+        path.indexOf("/videos") === 0 ||
+        path.indexOf("/news") === 0
       );
     } catch (e) {
       return false;
     }
+  }
+
+  function cleanResultTitle(title) {
+    return String(title || "")
+      .replace(/\*+/g, "")
+      .replace(/\s+/g, " ")
+      .replace(/^#+\s*/, "")
+      .trim();
+  }
+
+  function resultKey(url) {
+    try {
+      var u = new URL(url);
+      return (u.hostname.replace(/^www\./, "") + u.pathname).toLowerCase().replace(/\/$/, "");
+    } catch (e) {
+      return String(url || "").toLowerCase();
+    }
+  }
+
+  function isUsefulResult(title, url) {
+    title = cleanResultTitle(title);
+    if (!title || title.length < 2) return false;
+    if (NOISE_TITLES[title.toLowerCase()]) return false;
+    if (/^https?:\/\//i.test(title) && title === url) return false;
+    try {
+      var u = new URL(url);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+      if (u.hostname === "usc.local") return false;
+      var kind = engineHostKind(u.hostname);
+      if (kind && isSearchEngineResultPage(url)) return false;
+      if (kind === "bing" && (u.pathname.indexOf("/ck/") === 0 || u.pathname === "/")) return false;
+      if (kind === "google" && (u.pathname === "/" || u.pathname === "/webhp")) return false;
+      if (kind === "duckduckgo" && u.pathname.indexOf("/l/") !== 0 && !u.searchParams.get("uddg")) {
+        if (u.pathname === "/" || u.pathname.indexOf("/lite") === 0 || u.pathname.indexOf("/html") === 0) {
+          return false;
+        }
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function extractSearchResults(text, engine) {
+    var raw = String(text || "").replace(/\r\n/g, "\n");
+    var idx = raw.indexOf("Markdown Content:");
+    var md = idx >= 0 ? raw.slice(idx + "Markdown Content:".length) : raw;
+    var lines = md.split("\n");
+    var results = [];
+    var seen = {};
+
+    function pushResult(title, href, snippet) {
+      var url = unwrapRedirectUrl(href);
+      title = cleanResultTitle(title);
+      snippet = String(snippet || "")
+        .replace(/\*+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!isUsefulResult(title, url)) return;
+      var key = resultKey(url);
+      if (seen[key]) return;
+      seen[key] = 1;
+      results.push({
+        title: title,
+        url: url,
+        snippet: snippet.slice(0, 220),
+        engine: engine || ""
+      });
+    }
+
+    for (var i = 0; i < lines.length && results.length < RESULT_LIMIT; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+      var heading = line.match(/^#{1,3}\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
+      var numbered = line.match(/^\d+\.\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
+      var plain = line.match(/^\[([^\]]{3,120})\]\((https?:[^)]+)\)\s*$/);
+      var hit = heading || numbered || (plain && engine === "baidu" ? plain : null);
+      if (!hit) continue;
+      var snippet = "";
+      for (var j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        var next = lines[j].trim();
+        if (!next) continue;
+        if (/^#{1,3}\s*\[/.test(next) || /^\d+\.\s*\[/.test(next)) break;
+        if (/^!\[/.test(next)) continue;
+        if (/^\[[^\]]{1,40}\]\(https?:/.test(next) && next.length < 80) continue;
+        snippet = next.replace(/^\[[^\]]*\]\((https?:[^)]+)\)/, "").trim() || next;
+        snippet = snippet.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+        if (snippet) break;
+      }
+      pushResult(hit[1], hit[2], snippet);
+    }
+
+    if (!results.length) {
+      var re = /\[([^\]]{3,120})\]\((https?:[^)]+)\)/g;
+      var m;
+      while ((m = re.exec(md)) && results.length < RESULT_LIMIT) {
+        pushResult(m[1], m[2], "");
+      }
+    }
+    return results;
+  }
+
+  function fetchEngineResults(name, query, signal) {
+    var engine = ENGINES[name];
+    if (!engine) {
+      return Promise.resolve({ name: name, results: [], error: "unknown engine" });
+    }
+    return Browser.fetchPage(engine.searchUrl(query), {
+      signal: signal,
+      proxy: true,
+      forceProxy: true,
+      format: "markdown"
+    })
+      .then(function (fetched) {
+        return {
+          name: name,
+          results: extractSearchResults(fetched.text, name),
+          via: fetched.via
+        };
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") throw err;
+        return {
+          name: name,
+          results: [],
+          error: err && err.message ? err.message : "error"
+        };
+      });
+  }
+
+  function mergeSearchResults(batches) {
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < batches.length; i++) {
+      var list = batches[i].results || [];
+      for (var j = 0; j < list.length; j++) {
+        var item = list[j];
+        var key = resultKey(item.url);
+        if (seen[key]) continue;
+        seen[key] = 1;
+        out.push(item);
+        if (out.length >= RESULT_LIMIT) return out;
+      }
+    }
+    return out;
+  }
+
+  function buildSearchDocument(query, results, meta) {
+    meta = meta || {};
+    var hubUrl = internalSearchUrl(query);
+    var md =
+      "Title: " +
+      query +
+      "\nURL Source: " +
+      hubUrl +
+      "\n\nMarkdown Content:\n" +
+      query +
+      "\n\n";
+    if (meta.status) md += meta.status + "\n\n";
+    if (!results.length && !meta.status) {
+      md += "no results\n";
+    }
+    for (var i = 0; i < results.length; i++) {
+      var item = results[i];
+      md += "[" + item.title + "](" + item.url + ")\n";
+      try {
+        md += new URL(item.url).hostname.replace(/^www\./, "") + "\n";
+      } catch (e) {}
+      if (item.snippet) md += item.snippet + "\n";
+      md += "\n";
+    }
+    if (meta.related && meta.related.length) {
+      md += "related\n";
+      for (var r = 0; r < meta.related.length; r++) {
+        md += "[" + meta.related[r] + "](" + internalSearchUrl(meta.related[r]) + ")\n";
+      }
+    }
+    if (meta.footer) md += "\n" + meta.footer + "\n";
+    var documentModel = Browser.markdownToDocument(md, hubUrl);
+    documentModel.via = meta.via || "search";
+    documentModel.searchQuery = query;
+    documentModel.searchEngines = meta.engines || ALL.slice();
+    return documentModel;
   }
 
   function eventElement(target) {
@@ -763,12 +1080,22 @@
       if (isInternalSearchUrl(abs)) {
         var internalQuery = internalSearchQuery(abs);
         if (internalQuery) {
-          showSearchHub(internalQuery);
+          showSearchResults(internalQuery);
           return;
         }
         cancelPending();
         setCurrent(homeDocument(), nav || "push");
         return;
+      }
+      var engineQuery = engineQueryFromUrl(abs);
+      if (engineQuery) {
+        var kind = engineHostKind(new URL(abs).hostname);
+        showSearchResults(engineQuery, kind ? [kind] : ALL.slice());
+        return;
+      }
+      var unwrapped = unwrapRedirectUrl(abs);
+      if (unwrapped && unwrapped !== abs) {
+        abs = unwrapped;
       }
       if (!Browser.isSafeHttpUrl(abs) && abs !== "https://usc.local/") {
         printMsg("blocked url", "err");
@@ -777,6 +1104,10 @@
       if (abs === "https://usc.local/") {
         cancelPending();
         setCurrent(homeDocument(), nav || "push");
+        return;
+      }
+      if (isSearchEngineChromeUrl(abs)) {
+        printMsg("search engine UI skipped · stay in USC", "err");
         return;
       }
       if (abortCtrl) abortCtrl.abort();
@@ -792,8 +1123,6 @@
       setStatus(abs.replace(/^https?:\/\//, ""));
       msg.textContent = "";
       var hit = cache[abs];
-      // Search-engine result pages almost always block CORS; fetch them as
-      // text inside USC (via Jina when needed) instead of leaving the app.
       var allowProxy = proxyMode === "on" || isSearchEngineUrl(abs);
       var req = hit
         ? Promise.resolve(hit)
@@ -855,7 +1184,7 @@
 
     function follow(index) {
       if (!current || !current.links[index - 1]) {
-        showSearchHub(String(index));
+        showSearchResults(String(index));
         return;
       }
       go(current.links[index - 1].url, "push");
@@ -880,47 +1209,130 @@
       }
     }
 
-    function showSearchHub(query, selectedEngines) {
+    function showSearchResults(query, selectedEngines) {
       cancelPending();
-      var ticket = ++going;
-      var engines = selectedEngines || ALL;
-      var hubUrl = internalSearchUrl(query);
-      var md =
-        "Title: " +
-        query +
-        "\nURL Source: " +
-        hubUrl +
-        "\n\nMarkdown Content:\n" +
-        query +
-        "\n\nnumber / click → text inside USC · real → outside\n\n";
-      for (var i = 0; i < engines.length; i++) {
-        var name = engines[i];
-        md += "[" + name + "](" + ENGINES[name].searchUrl(query) + ")\n";
-      }
-      var documentModel = Browser.markdownToDocument(md, hubUrl);
-      setCurrent(documentModel, "push");
-      var hubPos = stackPos;
-      suggestMany(engines, query).then(function (results) {
-        if (ticket !== going || current !== documentModel || stack[hubPos] !== documentModel) return;
-        var extra = "\n";
-        for (var r = 0; r < results.length; r++) {
-          extra += "\n" + results[r].name + "\n";
-          for (var j = 0; j < results[r].suggestions.length; j++) {
-            var word = results[r].suggestions[j];
-            extra += "[" + word + "](" + internalSearchUrl(word) + ")\n";
-          }
-        }
-        var merged = Browser.markdownToDocument(md + extra, hubUrl);
-        merged.via = "suggest";
-        merged._historySeq = documentModel._historySeq;
-        current = merged;
-        stack[hubPos] = merged;
-        if (view === "page") paint();
+      var engines = (selectedEngines || ALL).filter(function (name) {
+        return !!ENGINES[name];
       });
+      if (!engines.length) engines = ALL.slice();
+      var primary = engines.filter(function (name) {
+        return name !== "duckduckgo";
+      });
+      var fetchList = primary.length ? primary : engines;
+      var ticket = ++going;
+      var controller = typeof AbortController === "function" ? new AbortController() : null;
+      abortCtrl = controller;
+      var timedOut = false;
+      var loadTimer = setTimeout(function () {
+        timedOut = true;
+        if (controller) controller.abort();
+      }, SEARCH_TIMEOUT);
+      var loadingDoc = buildSearchDocument(query, [], {
+        status: "searching…",
+        engines: engines
+      });
+      setCurrent(loadingDoc, "push");
+      var hubPos = stackPos;
+      setLoading(true);
+      setStatus("search");
+
+      Promise.all(
+        fetchList.map(function (name) {
+          return fetchEngineResults(name, query, controller && controller.signal);
+        })
+      )
+        .then(function (batches) {
+          if (ticket !== going) return null;
+          var merged = mergeSearchResults(batches);
+          if (merged.length) return { batches: batches, results: merged };
+          // Only add DDG fallback when it was not already the primary source.
+          if (fetchList.indexOf("duckduckgo") >= 0) {
+            return { batches: batches, results: merged };
+          }
+          return fetchEngineResults("duckduckgo", query, controller && controller.signal).then(
+            function (fallback) {
+              batches.push(fallback);
+              return { batches: batches, results: mergeSearchResults(batches) };
+            }
+          );
+        })
+        .then(function (payload) {
+          if (ticket !== going || !payload) return null;
+          var suggestEngines = engines.filter(function (name) {
+            return name !== "duckduckgo";
+          });
+          if (!suggestEngines.length) suggestEngines = ALL.slice();
+          return suggestMany(suggestEngines, query).then(function (suggestions) {
+            var related = [];
+            var seen = {};
+            for (var r = 0; r < suggestions.length; r++) {
+              var list = suggestions[r].suggestions || [];
+              for (var j = 0; j < list.length; j++) {
+                var word = list[j];
+                if (!word || word === query || seen[word]) continue;
+                seen[word] = 1;
+                related.push(word);
+                if (related.length >= 8) break;
+              }
+              if (related.length >= 8) break;
+            }
+            var sources = [];
+            for (var i = 0; i < payload.batches.length; i++) {
+              if (payload.batches[i].results && payload.batches[i].results.length) {
+                sources.push(payload.batches[i].name);
+              }
+            }
+            return {
+              results: payload.results,
+              related: related,
+              via: sources.length ? "search:" + sources.join("+") : "search",
+              engines: engines
+            };
+          });
+        })
+        .then(function (ready) {
+          clearTimeout(loadTimer);
+          if (ticket !== going || !ready) return;
+          if (current !== loadingDoc && stack[hubPos] !== loadingDoc) return;
+          setLoading(false);
+          var documentModel = buildSearchDocument(query, ready.results, {
+            related: ready.related,
+            via: ready.via,
+            engines: ready.engines,
+            footer: ready.results.length
+              ? "number / click → open text inside USC · real → outside"
+              : "no results · try another query or real"
+          });
+          documentModel._historySeq = loadingDoc._historySeq;
+          current = documentModel;
+          stack[hubPos] = documentModel;
+          if (documentModel.title) doc.title = documentModel.title + " · USC";
+          if (view === "page") paint();
+        })
+        .catch(function (err) {
+          clearTimeout(loadTimer);
+          if (ticket !== going) return;
+          setLoading(false);
+          if (err && err.name === "AbortError" && !timedOut) {
+            printMsg("stopped");
+            return;
+          }
+          var failed = buildSearchDocument(query, [], {
+            status:
+              "search failed: " +
+              (timedOut ? "timeout" : err && err.message ? err.message : "error"),
+            engines: engines,
+            footer: "real  opens a normal search engine"
+          });
+          failed._historySeq = loadingDoc._historySeq;
+          current = failed;
+          stack[hubPos] = failed;
+          if (view === "page") paint();
+        });
     }
 
     function runSearch(cmd) {
-      showSearchHub(cmd.query, cmd.engines);
+      showSearchResults(cmd.query, cmd.engines);
     }
 
     function handle(cmd, line) {
@@ -1394,6 +1806,20 @@
     applyAppearance();
     setCurrent(homeDocument(), "initial");
     input.focus();
+
+    // Keep the prompt above the soft keyboard on mobile browsers.
+    if (window.visualViewport) {
+      var syncViewport = function () {
+        var vv = window.visualViewport;
+        var inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        doc.body.style.setProperty("--keyboard-inset", inset + "px");
+        doc.documentElement.style.height = vv.height + "px";
+        doc.body.style.height = vv.height + "px";
+      };
+      window.visualViewport.addEventListener("resize", syncViewport);
+      window.visualViewport.addEventListener("scroll", syncViewport);
+      syncViewport();
+    }
   }
 
   return {
@@ -1402,6 +1828,12 @@
     parseLine: parseLine,
     suggestMany: suggestMany,
     isSearchEngineUrl: isSearchEngineUrl,
+    isSearchEngineResultPage: isSearchEngineResultPage,
+    engineQueryFromUrl: engineQueryFromUrl,
+    unwrapRedirectUrl: unwrapRedirectUrl,
+    extractSearchResults: extractSearchResults,
+    mergeSearchResults: mergeSearchResults,
+    buildSearchDocument: buildSearchDocument,
     isInternalSearchUrl: isInternalSearchUrl,
     internalSearchQuery: internalSearchQuery,
     internalSearchUrl: internalSearchUrl,
