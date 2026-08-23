@@ -22,7 +22,7 @@ python3 -m http.server 8765
 
 底部输入框同时是搜索框和地址栏：
 
-- 输入文字并回车：同时查询 Google、Bing、百度
+- 输入文字并回车：在 USC 内查询 Google、Bing、百度，并整理成纯文本结果列表
 - 输入网址并回车：在 USC 中读取页面
 - 输入链接编号并回车：打开对应链接；没有这个编号时按普通数字搜索
 - 输入时：显示联想；`↑` / `↓` 选择，`Tab` 补全，回车搜索
@@ -34,7 +34,7 @@ python3 -m http.server 8765
 › back
 ```
 
-搜索结果页和普通链接都在 USC 内以纯文本打开；不会跳到系统浏览器。点击 Google / Bing / 百度后，结果页同样在 USC 里阅读（搜索引擎页通常需经 Jina 读取）。需要系统浏览器时用 `real` / `real <n>`。联想词会再次打开站内搜索页。浏览器自身的后退/前进按钮也与 USC 历史同步。
+搜索不会跳到搜索引擎网页。USC 会抓取各引擎结果、解开跳转链接，并在本页展示标题、站点与摘要；点选结果后继续以纯文本阅读目标网页。需要系统浏览器时用 `real` / `real <n>`。相关搜索会再次打开站内结果页。手机浏览器已适配安全区、触摸点击与软键盘。浏览器自身的后退/前进按钮也与 USC 历史同步。
 
 ### 常用命令
 
@@ -64,7 +64,7 @@ python3 -m http.server 8765
 
 USC 默认只尝试从本机浏览器直接读取目标网页。许多网站不允许跨域读取，此时 USC 不会自动把 URL 交给第三方。
 
-只有输入 `proxy on` 后，失败的 URL 才可能发送给 [Jina Reader](https://r.jina.ai/)；成功时状态栏显示 `via jina`。搜索引擎结果页是例外：为了留在 USC 内阅读，它们在需要时会经 Jina 读取。输入 `proxy off` 可关闭对其余网站的代理。代理、书签和图片偏好只保存在当前浏览器的 `localStorage`。
+只有输入 `proxy on` 后，失败的 URL 才可能发送给 [Jina Reader](https://r.jina.ai/)；成功时状态栏显示 `via jina`。站内搜索是例外：为了在 USC 内汇总结果，查询 Google / Bing / 百度时会经 Jina 读取结果页并抽取链接。输入 `proxy off` 可关闭对其余网站的代理。代理、书签和图片偏好只保存在当前浏览器的 `localStorage`。
 
 ### 实现
 
@@ -111,7 +111,7 @@ Then visit `http://127.0.0.1:8765/`. There are no third-party dependencies.
 
 The bottom input is both a search box and an address bar:
 
-- Enter text: query Google, Bing, and Baidu
+- Enter text: query Google, Bing, and Baidu inside USC and get a plain-text result list
 - Enter a URL: read the page inside USC
 - Enter a link number: follow that link; if the number does not exist, search for it
 - While typing: use `↑` / `↓` to select a suggestion, `Tab` to complete, and Enter to search
@@ -123,7 +123,7 @@ The bottom input is both a search box and an address bar:
 › back
 ```
 
-Search results and ordinary links open as plain text inside USC; they do not leave for the system browser. After you open Google / Bing / Baidu, those result pages are also read inside USC (search-engine pages usually need Jina). Use `real` / `real <n>` when you need the system browser. Suggestion links reopen an in-app search page. Native browser Back and Forward buttons are synchronized with USC history.
+Search never leaves USC for an engine UI. USC fetches engine results, unwraps redirect links, and shows titles, hosts, and snippets on an in-app page. Opening a result continues as plain text. Use `real` / `real <n>` for the system browser. Related searches reopen the in-app results page. The UI is adapted for mobile browsers (safe areas, touch targets, soft keyboard). Native browser Back and Forward buttons are synchronized with USC history.
 
 ### Common commands
 
@@ -153,7 +153,7 @@ With an empty prompt, Space scrolls down; `Esc` clears input and stops loading. 
 
 By default, USC only attempts a direct request from your browser. Many sites block cross-origin reads; USC does not silently disclose their URLs to a third party.
 
-Only after `proxy on` may failed URLs be sent to [Jina Reader](https://r.jina.ai/). Successful proxied pages show `via jina` in the status line. Search-engine result pages are the exception: they may use Jina when needed so they can stay readable inside USC. Use `proxy off` to disable the proxy for other sites. Proxy choice, bookmarks, and image preference stay in this browser's `localStorage`.
+Only after `proxy on` may failed URLs be sent to [Jina Reader](https://r.jina.ai/). Successful proxied pages show `via jina` in the status line. In-app search is the exception: querying Google / Bing / Baidu uses Jina to fetch result pages and extract links inside USC. Use `proxy off` to disable the proxy for other sites. Proxy choice, bookmarks, and image preference stay in this browser's `localStorage`.
 
 ### Implementation
 

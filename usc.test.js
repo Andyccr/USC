@@ -152,7 +152,7 @@ assert.strictEqual(md.images[0].url, "https://ex.com/img.png");
 
 assert.strictEqual(
   USC.ENGINES.google.searchUrl("hello world"),
-  "https://www.google.com/search?q=hello%20world"
+  "https://www.google.com/search?q=hello%20world&hl=zh-CN"
 );
 assert.strictEqual(
   USC.ENGINES.bing.searchUrl("hello"),
@@ -189,6 +189,49 @@ assert.strictEqual(USC.isSearchEngineUrl("https://www.google.co.uk/search?q=hi")
 assert.strictEqual(USC.isSearchEngineUrl("https://www.bing.com/search?q=hi"), true);
 assert.strictEqual(USC.isSearchEngineUrl("https://www.baidu.com/s?wd=hi"), true);
 assert.strictEqual(USC.isSearchEngineUrl("https://example.com/"), false);
+assert.strictEqual(USC.isSearchEngineResultPage("https://www.bing.com/search?q=hello"), true);
+assert.strictEqual(USC.engineQueryFromUrl("https://www.bing.com/search?q=hello+world"), "hello world");
+assert.strictEqual(USC.engineQueryFromUrl("https://www.baidu.com/s?wd=%E9%87%8F%E5%AD%90"), "量子");
+assert.strictEqual(
+  USC.unwrapRedirectUrl(
+    "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FQuantum_computing&rut=abc"
+  ),
+  "https://en.wikipedia.org/wiki/Quantum_computing"
+);
+assert.strictEqual(
+  USC.unwrapRedirectUrl(
+    "https://www.bing.com/ck/a?!&&u=a1aHR0cHM6Ly9lbi53aWtpcGVkaWEub3JnL3dpa2kvUXVhbnR1bV9jb21wdXRpbmc&ntb=1"
+  ),
+  "https://en.wikipedia.org/wiki/Quantum_computing"
+);
+
+var bingSample =
+  "Title: hello - Bing\nURL Source: https://www.bing.com/search?q=hello\n\nMarkdown Content:\n" +
+  "## [**Hello** - **Wikipedia**](https://www.bing.com/ck/a?!&&u=a1aHR0cHM6Ly9lbi53aWtpcGVkaWEub3JnL3dpa2kvSGVsbG8&ntb=1)\n" +
+  "Hello is a greeting.\n" +
+  "## [Skip to content](https://www.bing.com/search?q=hello#)\n";
+var extracted = USC.extractSearchResults(bingSample, "bing");
+assert.strictEqual(extracted.length, 1);
+assert.strictEqual(extracted[0].title, "Hello - Wikipedia");
+assert.strictEqual(extracted[0].url, "https://en.wikipedia.org/wiki/Hello");
+assert.ok(extracted[0].snippet.indexOf("greeting") >= 0);
+
+var ddgSample =
+  "1.[Quantum computing - Wikipedia](https://duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FQuantum_computing&rut=x)\n" +
+  "A quantum computer is a computer.\n" +
+  "en.wikipedia.org/wiki/Quantum_computing\n";
+var ddgExtracted = USC.extractSearchResults(ddgSample, "duckduckgo");
+assert.strictEqual(ddgExtracted.length, 1);
+assert.strictEqual(ddgExtracted[0].url, "https://en.wikipedia.org/wiki/Quantum_computing");
+
+var built = USC.buildSearchDocument("hello", extracted, { related: ["hello world"] });
+assert.strictEqual(built.url.indexOf("usc.local/search") >= 0, true);
+assert.ok(built.links.some(function (link) {
+  return link.url === "https://en.wikipedia.org/wiki/Hello";
+}));
+assert.ok(built.links.some(function (link) {
+  return link.url.indexOf("usc.local/search") >= 0;
+}));
 
 var originalFetch = global.fetch;
 
