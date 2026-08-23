@@ -299,16 +299,23 @@
 
   function isSearchEngineUrl(url) {
     try {
-      var host = new URL(url).hostname.replace(/^www\./, "");
+      var host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
       return (
-        host === "google.com" ||
         host === "bing.com" ||
         host === "baidu.com" ||
-        /\.google\.[a-z.]+$/i.test(host)
+        /(^|\.)google\./i.test(host) ||
+        /(^|\.)bing\./i.test(host) ||
+        /(^|\.)baidu\./i.test(host)
       );
     } catch (e) {
       return false;
     }
+  }
+
+  function eventElement(target) {
+    if (!target) return null;
+    if (target.nodeType === 1) return target;
+    return target.parentElement || null;
   }
 
   function isInternalSearchUrl(url) {
@@ -442,11 +449,11 @@
     function printMsg(text, className, href) {
       if (href) {
         var link = doc.createElement("a");
-        link.href = href;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
+        link.className = (className ? className + " " : "") + "ln";
+        link.href = "#";
+        link.setAttribute("data-url", href);
+        link.title = href;
         link.textContent = text;
-        if (className) link.className = className;
         msg.appendChild(link);
         msg.appendChild(doc.createTextNode("\n"));
       } else {
@@ -593,9 +600,11 @@
         } else if (tok.t === "link") {
           var a = doc.createElement("a");
           a.className = "ln";
-          a.href = tok.url;
-          a.rel = "noopener noreferrer";
+          // Keep navigation inside USC: never put the real URL in href.
+          a.href = "#";
           a.setAttribute("data-url", tok.url);
+          a.title = tok.url;
+          a.setAttribute("draggable", "false");
           appendFindText(a, "[" + tok.n + "] " + tok.v);
           page.appendChild(a);
         } else if (tok.t === "img") {
@@ -783,11 +792,14 @@
       setStatus(abs.replace(/^https?:\/\//, ""));
       msg.textContent = "";
       var hit = cache[abs];
+      // Search-engine result pages almost always block CORS; fetch them as
+      // text inside USC (via Jina when needed) instead of leaving the app.
+      var allowProxy = proxyMode === "on" || isSearchEngineUrl(abs);
       var req = hit
         ? Promise.resolve(hit)
         : Browser.fetchPage(abs, {
             signal: controller && controller.signal,
-            proxy: proxyMode === "on"
+            proxy: allowProxy
           });
       req
         .then(function (fetched) {
@@ -880,7 +892,7 @@
         hubUrl +
         "\n\nMarkdown Content:\n" +
         query +
-        "\n\nnumber opens as text · real opens outside · proxy on if blocked\n\n";
+        "\n\nnumber / click → text inside USC · real → outside\n\n";
       for (var i = 0; i < engines.length; i++) {
         var name = engines[i];
         md += "[" + name + "](" + ENGINES[name].searchUrl(query) + ")\n";
@@ -1295,18 +1307,33 @@
       }, 280);
     });
 
-    page.addEventListener("click", function (event) {
-      var imageButton = event.target.closest ? event.target.closest("button[data-image]") : null;
+    function followDataLink(event) {
+      var el = eventElement(event.target);
+      if (!el || !el.closest) return false;
+      var imageButton = el.closest("button[data-image]");
       if (imageButton) {
+        event.preventDefault();
         loadImages(parseInt(imageButton.getAttribute("data-image"), 10));
-        return;
+        return true;
       }
-      var a = event.target.closest ? event.target.closest("a.ln") : null;
-      if (!a) return;
-      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+      var a = el.closest("a.ln");
+      if (!a) return false;
       event.preventDefault();
-      go(a.getAttribute("data-url"), "push");
-    });
+      if (typeof event.stopPropagation === "function") event.stopPropagation();
+      var target = a.getAttribute("data-url");
+      if (target) go(target, "push");
+      return true;
+    }
+
+    page.addEventListener("click", followDataLink, true);
+    msg.addEventListener("click", followDataLink, true);
+    page.addEventListener(
+      "auxclick",
+      function (event) {
+        if (event.button === 1) followDataLink(event);
+      },
+      true
+    );
 
     if (nativeHistory) {
       window.addEventListener("popstate", function (event) {
