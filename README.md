@@ -34,7 +34,7 @@ python3 -m http.server 8765
 › back
 ```
 
-搜索结果页和普通链接都在 USC 内以纯文本打开；需要系统浏览器时用 `real` / `real <n>`。联想词会再次打开站内搜索页。浏览器自身的后退/前进按钮也与 USC 历史同步。
+搜索结果页和普通链接都在 USC 内以纯文本打开；不会跳到系统浏览器。点击 Google / Bing / 百度后，结果页同样在 USC 里阅读（搜索引擎页通常需经 Jina 读取）。需要系统浏览器时用 `real` / `real <n>`。联想词会再次打开站内搜索页。浏览器自身的后退/前进按钮也与 USC 历史同步。
 
 ### 常用命令
 
@@ -64,7 +64,7 @@ python3 -m http.server 8765
 
 USC 默认只尝试从本机浏览器直接读取目标网页。许多网站不允许跨域读取，此时 USC 不会自动把 URL 交给第三方。
 
-只有输入 `proxy on` 后，失败的 URL 才可能发送给 [Jina Reader](https://r.jina.ai/)；成功时状态栏显示 `via jina`。输入 `proxy off` 可关闭。代理、书签和图片偏好只保存在当前浏览器的 `localStorage`。
+只有输入 `proxy on` 后，失败的 URL 才可能发送给 [Jina Reader](https://r.jina.ai/)；成功时状态栏显示 `via jina`。搜索引擎结果页是例外：为了留在 USC 内阅读，它们在需要时会经 Jina 读取。输入 `proxy off` 可关闭对其余网站的代理。代理、书签和图片偏好只保存在当前浏览器的 `localStorage`。
 
 ### 实现
 
@@ -123,7 +123,7 @@ The bottom input is both a search box and an address bar:
 › back
 ```
 
-Search results and ordinary links open as plain text inside USC. Use `real` / `real <n>` when you need the system browser. Suggestion links reopen an in-app search page. Native browser Back and Forward buttons are synchronized with USC history.
+Search results and ordinary links open as plain text inside USC; they do not leave for the system browser. After you open Google / Bing / Baidu, those result pages are also read inside USC (search-engine pages usually need Jina). Use `real` / `real <n>` when you need the system browser. Suggestion links reopen an in-app search page. Native browser Back and Forward buttons are synchronized with USC history.
 
 ### Common commands
 
@@ -153,7 +153,7 @@ With an empty prompt, Space scrolls down; `Esc` clears input and stops loading. 
 
 By default, USC only attempts a direct request from your browser. Many sites block cross-origin reads; USC does not silently disclose their URLs to a third party.
 
-Only after `proxy on` may failed URLs be sent to [Jina Reader](https://r.jina.ai/). Successful proxied pages show `via jina` in the status line. Use `proxy off` to disable it. Proxy choice, bookmarks, and image preference stay in this browser's `localStorage`.
+Only after `proxy on` may failed URLs be sent to [Jina Reader](https://r.jina.ai/). Successful proxied pages show `via jina` in the status line. Search-engine result pages are the exception: they may use Jina when needed so they can stay readable inside USC. Use `proxy off` to disable the proxy for other sites. Proxy choice, bookmarks, and image preference stay in this browser's `localStorage`.
 
 ### Implementation
 
