@@ -1300,7 +1300,9 @@
             via: ready.via,
             engines: ready.engines,
             footer: ready.results.length
-              ? "number / click → open text inside USC · real → outside"
+              ? proxyMode === "on"
+                ? "number / click → open text inside USC · real → outside"
+                : "number / click → open · proxy on if blocked · real → outside"
               : "no results · try another query or real"
           });
           documentModel._historySeq = loadingDoc._historySeq;
