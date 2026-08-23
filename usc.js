@@ -115,7 +115,10 @@
     "share     share current page\n" +
     "g hello  google only\n" +
     "s back   search a command word\n" +
-    ":cmd     any command\n";
+    "real     open outside\n" +
+    ":cmd     any command\n" +
+    "\n" +
+    "links stay as text inside USC\n";
 
   function listFrom(value) {
     if (!Array.isArray(value)) return [];
@@ -306,6 +309,30 @@
     } catch (e) {
       return false;
     }
+  }
+
+  function isInternalSearchUrl(url) {
+    try {
+      var u = new URL(url);
+      return u.hostname === "usc.local" && (u.pathname === "/search" || u.pathname === "/");
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function internalSearchQuery(url) {
+    try {
+      var u = new URL(url);
+      if (u.hostname !== "usc.local") return "";
+      if (u.pathname === "/search") return u.searchParams.get("q") || "";
+      return "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function internalSearchUrl(query) {
+    return "https://usc.local/search?q=" + encodeURIComponent(query);
   }
 
   function storageGet(key, fallback) {
@@ -724,6 +751,16 @@
       } else {
         abs = Browser.normalizeUrl(rawUrl, current && current.url);
       }
+      if (isInternalSearchUrl(abs)) {
+        var internalQuery = internalSearchQuery(abs);
+        if (internalQuery) {
+          showSearchHub(internalQuery);
+          return;
+        }
+        cancelPending();
+        setCurrent(homeDocument(), nav || "push");
+        return;
+      }
       if (!Browser.isSafeHttpUrl(abs) && abs !== "https://usc.local/") {
         printMsg("blocked url", "err");
         return;
@@ -778,6 +815,11 @@
           var message = timedOut ? "timeout" : err && err.message ? err.message : "error";
           printMsg("fetch failed: " + message, "err");
           printMsg(abs, "", abs);
+          var hint =
+            "real  opens this URL in a normal browser\n" +
+            (proxyMode === "on"
+              ? ""
+              : "proxy on  retry via Jina when the site blocks direct reads\n");
           var stub = Browser.markdownToDocument(
             "Title: " +
               abs +
@@ -789,7 +831,8 @@
               abs +
               "](" +
               abs +
-              ")\n\nreal  opens this URL in a normal browser\n",
+              ")\n\n" +
+              hint,
             abs
           );
           stub.via = "error";
@@ -803,12 +846,7 @@
         showSearchHub(String(index));
         return;
       }
-      var target = current.links[index - 1].url;
-      if (isSearchEngineUrl(target)) {
-        openExternal(target);
-        return;
-      }
-      go(target, "push");
+      go(current.links[index - 1].url, "push");
     }
 
     function loadImages(which) {
@@ -834,17 +872,20 @@
       cancelPending();
       var ticket = ++going;
       var engines = selectedEngines || ALL;
+      var hubUrl = internalSearchUrl(query);
       var md =
         "Title: " +
         query +
-        "\nURL Source: https://usc.local/search\n\nMarkdown Content:\n" +
+        "\nURL Source: " +
+        hubUrl +
+        "\n\nMarkdown Content:\n" +
         query +
-        "\n\n";
+        "\n\nnumber opens as text · real opens outside · proxy on if blocked\n\n";
       for (var i = 0; i < engines.length; i++) {
         var name = engines[i];
         md += "[" + name + "](" + ENGINES[name].searchUrl(query) + ")\n";
       }
-      var documentModel = Browser.markdownToDocument(md, "https://usc.local/search");
+      var documentModel = Browser.markdownToDocument(md, hubUrl);
       setCurrent(documentModel, "push");
       var hubPos = stackPos;
       suggestMany(engines, query).then(function (results) {
@@ -854,15 +895,10 @@
           extra += "\n" + results[r].name + "\n";
           for (var j = 0; j < results[r].suggestions.length; j++) {
             var word = results[r].suggestions[j];
-            extra +=
-              "[" +
-              word +
-              "](" +
-              ENGINES[results[r].name].searchUrl(word) +
-              ")\n";
+            extra += "[" + word + "](" + internalSearchUrl(word) + ")\n";
           }
         }
-        var merged = Browser.markdownToDocument(md + extra, "https://usc.local/search");
+        var merged = Browser.markdownToDocument(md + extra, hubUrl);
         merged.via = "suggest";
         merged._historySeq = documentModel._historySeq;
         current = merged;
@@ -1269,9 +1305,7 @@
       if (!a) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey) return;
       event.preventDefault();
-      var target = a.getAttribute("data-url");
-      if (isSearchEngineUrl(target)) openExternal(target);
-      else go(target, "push");
+      go(a.getAttribute("data-url"), "push");
     });
 
     if (nativeHistory) {
@@ -1340,6 +1374,10 @@
     ENGINES: ENGINES,
     parseLine: parseLine,
     suggestMany: suggestMany,
+    isSearchEngineUrl: isSearchEngineUrl,
+    isInternalSearchUrl: isInternalSearchUrl,
+    internalSearchQuery: internalSearchQuery,
+    internalSearchUrl: internalSearchUrl,
     mount: mount,
     Browser: Browser
   };
