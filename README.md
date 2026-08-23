@@ -34,7 +34,7 @@ python3 -m http.server 8765
 › back
 ```
 
-普通链接在 USC 内打开，搜索引擎链接交给系统浏览器。浏览器自身的后退/前进按钮也与 USC 历史同步。
+搜索结果页和普通链接都在 USC 内以纯文本打开；需要系统浏览器时用 `real` / `real <n>`。联想词会再次打开站内搜索页。浏览器自身的后退/前进按钮也与 USC 历史同步。
 
 ### 常用命令
 
@@ -46,6 +46,7 @@ python3 -m http.server 8765
 | `i on` / `i off` | 以后自动 / 不自动加载图片 |
 | `g <词>` / `b <词>` / `d <词>` | 只使用 Google / Bing / 百度 |
 | `s <词>` | 强制搜索与命令同名的词，例如 `s back` |
+| `real` / `real <n>` | 在系统浏览器中打开当前页 / 链接 n |
 | `find <词>` | 页内查找并报告匹配数量 |
 | `bookmark` / `bookmarks` | 保存当前页 / 查看书签 |
 | `proxy on` / `proxy off` | 允许 / 禁止 Jina 跨域后备读取 |
@@ -122,7 +123,7 @@ The bottom input is both a search box and an address bar:
 › back
 ```
 
-Normal links open inside USC. Search-engine links open in the system browser. Native browser Back and Forward buttons are synchronized with USC history.
+Search results and ordinary links open as plain text inside USC. Use `real` / `real <n>` when you need the system browser. Suggestion links reopen an in-app search page. Native browser Back and Forward buttons are synchronized with USC history.
 
 ### Common commands
 
@@ -134,6 +135,7 @@ Normal links open inside USC. Search-engine links open in the system browser. Na
 | `i on` / `i off` | Enable / disable automatic image loading |
 | `g <query>` / `b <query>` / `d <query>` | Use Google / Bing / Baidu only |
 | `s <query>` | Search a reserved command word, for example `s back` |
+| `real` / `real <n>` | Open the current page / link n in the system browser |
 | `find <text>` | Find text and report the match count |
 | `bookmark` / `bookmarks` | Save the current page / list bookmarks |
 | `proxy on` / `proxy off` | Enable / disable the Jina cross-origin fallback |

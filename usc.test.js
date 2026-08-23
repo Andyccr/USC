@@ -177,6 +177,18 @@ assert.deepStrictEqual(
   ["hello", "hellotalk"]
 );
 
+assert.strictEqual(
+  USC.internalSearchUrl("hello world"),
+  "https://usc.local/search?q=hello%20world"
+);
+assert.strictEqual(USC.isInternalSearchUrl("https://usc.local/search?q=hi"), true);
+assert.strictEqual(USC.internalSearchQuery("https://usc.local/search?q=hi"), "hi");
+assert.strictEqual(USC.isInternalSearchUrl("https://www.google.com/search?q=hi"), false);
+assert.strictEqual(USC.isSearchEngineUrl("https://www.google.com/search?q=hi"), true);
+assert.strictEqual(USC.isSearchEngineUrl("https://www.bing.com/search?q=hi"), true);
+assert.strictEqual(USC.isSearchEngineUrl("https://www.baidu.com/s?wd=hi"), true);
+assert.strictEqual(USC.isSearchEngineUrl("https://example.com/"), false);
+
 var originalFetch = global.fetch;
 
 (async function () {
