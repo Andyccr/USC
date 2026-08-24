@@ -477,7 +477,7 @@
       .catch(function (err) {
         if (err && err.name === "AbortError") throw err;
         if (!opts.proxy) {
-          var blocked = new Error("cross-origin blocked · type proxy on to use Jina");
+          var blocked = new Error("cross-origin blocked · type proxy auto to use Jina");
           blocked.proxyDisabled = true;
           throw blocked;
         }

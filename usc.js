@@ -13,7 +13,8 @@
   var MAX_CACHE = 20;
   var MAX_RAW = 2000000;
   var LOAD_TIMEOUT = 15000;
-  var SEARCH_TIMEOUT = 28000;
+  var SEARCH_TIMEOUT = 22000;
+  var ENGINE_TIMEOUT = 9000;
   var BOOKMARK_KEY = "usc.bookmarks";
   var IMAGE_KEY = "usc.images";
   var PROXY_KEY = "usc.proxy";
@@ -42,6 +43,7 @@
     ":font +",
     ":font -",
     ":font reset",
+    ":proxy auto",
     ":proxy on",
     ":proxy off",
     ":help"
@@ -143,7 +145,7 @@
     "back     home     help\n" +
     "i 1      load image 1\n" +
     "i on     always load images\n" +
-    "proxy on  allow Jina fallback\n" +
+    "proxy     auto / on / off\n" +
     "theme     dark / light / system\n" +
     "font +    adjust text size\n" +
     "copy      copy current URL\n" +
@@ -153,7 +155,7 @@
     "real     open outside\n" +
     ":cmd     any command\n" +
     "\n" +
-    "search stays inside USC as text\n";
+    "search and pages stay inside USC\n";
 
   function listFrom(value) {
     if (!Array.isArray(value)) return [];
@@ -223,8 +225,8 @@
       if (/^\d+$/.test(rest)) return { type: "copy", index: parseInt(rest, 10) };
       return { type: "usage", message: "copy [n]" };
     } else if (head === "proxy") {
-      if (rest === "on" || rest === "off") return { type: "proxy", mode: rest };
-      return { type: "usage", message: "proxy on|off" };
+      if (rest === "on" || rest === "off" || rest === "auto") return { type: "proxy", mode: rest };
+      return { type: "usage", message: "proxy auto|on|off" };
     } else if (head === "img" || head === "i") {
       if (!rest) return { type: "images", mode: "show" };
       if (rest === "on" || rest === "off") return { type: "images", mode: rest };
@@ -517,10 +519,10 @@
     for (var i = 0; i < lines.length && results.length < RESULT_LIMIT; i++) {
       var line = lines[i].trim();
       if (!line) continue;
-      var heading = line.match(/^#{1,3}\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
+      var heading = line.match(/^#{1,6}\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
       var numbered = line.match(/^\d+\.\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
       var plain = line.match(/^\[([^\]]{3,120})\]\((https?:[^)]+)\)\s*$/);
-      var hit = heading || numbered || (plain && engine === "baidu" ? plain : null);
+      var hit = heading || numbered || plain;
       if (!hit) continue;
       var snippet = "";
       for (var j = i + 1; j < Math.min(i + 4, lines.length); j++) {
@@ -546,17 +548,61 @@
     return results;
   }
 
+  function withTimeout(promise, ms, signal) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        var err = new Error("timeout");
+        err.name = "TimeoutError";
+        reject(err);
+      }, ms);
+      function finish(fn, value) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        fn(value);
+      }
+      if (signal) {
+        if (signal.aborted) {
+          finish(reject, Object.assign(new Error("aborted"), { name: "AbortError" }));
+          return;
+        }
+        signal.addEventListener(
+          "abort",
+          function () {
+            finish(reject, Object.assign(new Error("aborted"), { name: "AbortError" }));
+          },
+          { once: true }
+        );
+      }
+      promise.then(
+        function (value) {
+          finish(resolve, value);
+        },
+        function (err) {
+          finish(reject, err);
+        }
+      );
+    });
+  }
+
   function fetchEngineResults(name, query, signal) {
     var engine = ENGINES[name];
     if (!engine) {
       return Promise.resolve({ name: name, results: [], error: "unknown engine" });
     }
-    return Browser.fetchPage(engine.searchUrl(query), {
-      signal: signal,
-      proxy: true,
-      forceProxy: true,
-      format: "markdown"
-    })
+    return withTimeout(
+      Browser.fetchPage(engine.searchUrl(query), {
+        signal: signal,
+        proxy: true,
+        forceProxy: true,
+        format: "markdown"
+      }),
+      ENGINE_TIMEOUT,
+      signal
+    )
       .then(function (fetched) {
         return {
           name: name,
@@ -713,7 +759,8 @@
     var current = null;
     var view = "page";
     var imagesMode = storageGet(IMAGE_KEY, "off") === "on" ? "on" : "off";
-    var proxyMode = storageGet(PROXY_KEY, "off") === "on" ? "on" : "off";
+    var proxyMode = storageGet(PROXY_KEY, "auto");
+    if (proxyMode !== "on" && proxyMode !== "off") proxyMode = "auto";
     var themeMode = storageGet(THEME_KEY, "system");
     var fontSize = parseInt(storageGet(FONT_KEY, "15"), 10);
     if (themeMode !== "dark" && themeMode !== "light") themeMode = "system";
@@ -1123,7 +1170,8 @@
       setStatus(abs.replace(/^https?:\/\//, ""));
       msg.textContent = "";
       var hit = cache[abs];
-      var allowProxy = proxyMode === "on" || isSearchEngineUrl(abs);
+      // auto (default) and on both allow Jina when CORS blocks reading.
+      var allowProxy = proxyMode !== "off" || isSearchEngineUrl(abs);
       var req = hit
         ? Promise.resolve(hit)
         : Browser.fetchPage(abs, {
@@ -1158,9 +1206,9 @@
           printMsg(abs, "", abs);
           var hint =
             "real  opens this URL in a normal browser\n" +
-            (proxyMode === "on"
-              ? ""
-              : "proxy on  retry via Jina when the site blocks direct reads\n");
+            (proxyMode === "off"
+              ? "proxy auto  retry via Jina when the site blocks direct reads\n"
+              : "");
           var stub = Browser.markdownToDocument(
             "Title: " +
               abs +
@@ -1215,10 +1263,11 @@
         return !!ENGINES[name];
       });
       if (!engines.length) engines = ALL.slice();
-      var primary = engines.filter(function (name) {
-        return name !== "duckduckgo";
-      });
-      var fetchList = primary.length ? primary : engines;
+      // Multi-engine search also queries DuckDuckGo in parallel — reliable SERP via Jina.
+      var fetchList = engines.slice();
+      if (engines.length > 1 && fetchList.indexOf("duckduckgo") < 0) {
+        fetchList.push("duckduckgo");
+      }
       var ticket = ++going;
       var controller = typeof AbortController === "function" ? new AbortController() : null;
       abortCtrl = controller;
@@ -1236,101 +1285,113 @@
       setLoading(true);
       setStatus("search");
 
-      Promise.all(
-        fetchList.map(function (name) {
-          return fetchEngineResults(name, query, controller && controller.signal);
-        })
-      )
-        .then(function (batches) {
-          if (ticket !== going) return null;
-          var merged = mergeSearchResults(batches);
-          if (merged.length) return { batches: batches, results: merged };
-          // Only add DDG fallback when it was not already the primary source.
-          if (fetchList.indexOf("duckduckgo") >= 0) {
-            return { batches: batches, results: merged };
-          }
-          return fetchEngineResults("duckduckgo", query, controller && controller.signal).then(
-            function (fallback) {
-              batches.push(fallback);
-              return { batches: batches, results: mergeSearchResults(batches) };
-            }
-          );
-        })
-        .then(function (payload) {
-          if (ticket !== going || !payload) return null;
-          var suggestEngines = engines.filter(function (name) {
-            return name !== "duckduckgo";
-          });
-          if (!suggestEngines.length) suggestEngines = ALL.slice();
-          return suggestMany(suggestEngines, query).then(function (suggestions) {
-            var related = [];
-            var seen = {};
-            for (var r = 0; r < suggestions.length; r++) {
-              var list = suggestions[r].suggestions || [];
-              for (var j = 0; j < list.length; j++) {
-                var word = list[j];
-                if (!word || word === query || seen[word]) continue;
-                seen[word] = 1;
-                related.push(word);
-                if (related.length >= 8) break;
-              }
+      var batches = [];
+      var related = [];
+      var paintedOnce = false;
+      var suggestEngines = engines.filter(function (name) {
+        return name !== "duckduckgo";
+      });
+      if (!suggestEngines.length) suggestEngines = ALL.slice();
+
+      function stillHere() {
+        return ticket === going && stack[hubPos] && stackPos === hubPos;
+      }
+
+      function sourcesOf() {
+        var sources = [];
+        for (var i = 0; i < batches.length; i++) {
+          if (batches[i].results && batches[i].results.length) sources.push(batches[i].name);
+        }
+        return sources;
+      }
+
+      function paintSearch(statusText, isFinal) {
+        if (ticket !== going) return;
+        if (stackPos !== hubPos) return;
+        var merged = mergeSearchResults(batches);
+        var sources = sourcesOf();
+        var documentModel = buildSearchDocument(query, merged, {
+          status: statusText || "",
+          related: related,
+          via: sources.length ? "search:" + sources.join("+") : "search",
+          engines: engines,
+          footer: merged.length
+            ? "number / click → open text inside USC · real → outside"
+            : isFinal
+              ? "no results · try another query · real opens outside"
+              : ""
+        });
+        documentModel._historySeq = loadingDoc._historySeq;
+        current = documentModel;
+        stack[hubPos] = documentModel;
+        if (documentModel.title) doc.title = documentModel.title + " · USC";
+        if (view === "page") paint();
+        paintedOnce = true;
+        if (isFinal) {
+          setLoading(false);
+          clearTimeout(loadTimer);
+        }
+      }
+
+      suggestMany(suggestEngines, query)
+        .then(function (suggestions) {
+          if (ticket !== going) return;
+          var seen = {};
+          related = [];
+          for (var r = 0; r < suggestions.length; r++) {
+            var list = suggestions[r].suggestions || [];
+            for (var j = 0; j < list.length; j++) {
+              var word = list[j];
+              if (!word || word === query || seen[word]) continue;
+              seen[word] = 1;
+              related.push(word);
               if (related.length >= 8) break;
             }
-            var sources = [];
-            for (var i = 0; i < payload.batches.length; i++) {
-              if (payload.batches[i].results && payload.batches[i].results.length) {
-                sources.push(payload.batches[i].name);
-              }
-            }
-            return {
-              results: payload.results,
-              related: related,
-              via: sources.length ? "search:" + sources.join("+") : "search",
-              engines: engines
-            };
-          });
-        })
-        .then(function (ready) {
-          clearTimeout(loadTimer);
-          if (ticket !== going || !ready) return;
-          if (current !== loadingDoc && stack[hubPos] !== loadingDoc) return;
-          setLoading(false);
-          var documentModel = buildSearchDocument(query, ready.results, {
-            related: ready.related,
-            via: ready.via,
-            engines: ready.engines,
-            footer: ready.results.length
-              ? proxyMode === "on"
-                ? "number / click → open text inside USC · real → outside"
-                : "number / click → open · proxy on if blocked · real → outside"
-              : "no results · try another query or real"
-          });
-          documentModel._historySeq = loadingDoc._historySeq;
-          current = documentModel;
-          stack[hubPos] = documentModel;
-          if (documentModel.title) doc.title = documentModel.title + " · USC";
-          if (view === "page") paint();
-        })
-        .catch(function (err) {
-          clearTimeout(loadTimer);
-          if (ticket !== going) return;
-          setLoading(false);
-          if (err && err.name === "AbortError" && !timedOut) {
-            printMsg("stopped");
-            return;
+            if (related.length >= 8) break;
           }
-          var failed = buildSearchDocument(query, [], {
-            status:
-              "search failed: " +
-              (timedOut ? "timeout" : err && err.message ? err.message : "error"),
-            engines: engines,
-            footer: "real  opens a normal search engine"
+          if (!paintedOnce && related.length) paintSearch("searching…", false);
+        })
+        .catch(function () {});
+
+      var pending = fetchList.length;
+      if (!pending) {
+        paintSearch("no engines", true);
+        return;
+      }
+
+      fetchList.forEach(function (name) {
+        fetchEngineResults(name, query, controller && controller.signal)
+          .then(function (batch) {
+            if (ticket !== going) return;
+            batches.push(batch);
+            pending -= 1;
+            var merged = mergeSearchResults(batches);
+            if (merged.length) {
+              paintSearch(pending ? "searching…" : "", pending === 0);
+            } else if (pending === 0) {
+              paintSearch(timedOut ? "search timeout" : "", true);
+            }
+          })
+          .catch(function (err) {
+            if (ticket !== going) return;
+            if (err && err.name === "AbortError" && !timedOut) {
+              pending -= 1;
+              if (pending <= 0) {
+                setLoading(false);
+                clearTimeout(loadTimer);
+                printMsg("stopped");
+              }
+              return;
+            }
+            batches.push({
+              name: name,
+              results: [],
+              error: err && err.message ? err.message : "error"
+            });
+            pending -= 1;
+            if (pending === 0) paintSearch(timedOut ? "search timeout" : "", true);
           });
-          failed._historySeq = loadingDoc._historySeq;
-          current = failed;
-          stack[hubPos] = failed;
-          if (view === "page") paint();
-        });
+      });
     }
 
     function runSearch(cmd) {
@@ -1431,13 +1492,15 @@
         return;
       }
       if (cmd.type === "proxy") {
-        if (cmd.mode === "on" || cmd.mode === "off") {
+        if (cmd.mode === "on" || cmd.mode === "off" || cmd.mode === "auto") {
           proxyMode = cmd.mode;
           storageSet(PROXY_KEY, proxyMode);
           printMsg(
-            proxyMode === "on"
-              ? "proxy on · failed pages may be sent to r.jina.ai"
-              : "proxy off"
+            proxyMode === "off"
+              ? "proxy off"
+              : proxyMode === "on"
+                ? "proxy on · pages may use r.jina.ai"
+                : "proxy auto · Jina only when a site blocks direct reads"
           );
         } else {
           printMsg("proxy " + proxyMode);
