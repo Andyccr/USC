@@ -49,7 +49,7 @@ python3 -m http.server 8765
 | `real` / `real <n>` | 在系统浏览器中打开当前页 / 链接 n |
 | `find <词>` | 页内查找并报告匹配数量 |
 | `bookmark` / `bookmarks` | 保存当前页 / 查看书签 |
-| `proxy on` / `proxy off` | 允许 / 禁止 Jina 跨域后备读取 |
+| `proxy auto` / `on` / `off` | 自动 / 允许 / 禁止 Jina 跨域后备（默认 auto） |
 | `theme dark/light/system` | 切换并记住界面主题 |
 | `font +` / `font -` / `font reset` | 调整并记住正文字号 |
 | `copy` / `copy <n>` | 复制当前 URL / 链接 n |
@@ -64,7 +64,7 @@ python3 -m http.server 8765
 
 USC 默认只尝试从本机浏览器直接读取目标网页。许多网站不允许跨域读取，此时 USC 不会自动把 URL 交给第三方。
 
-只有输入 `proxy on` 后，失败的 URL 才可能发送给 [Jina Reader](https://r.jina.ai/)；成功时状态栏显示 `via jina`。站内搜索是例外：为了在 USC 内汇总结果，查询 Google / Bing / 百度时会经 Jina 读取结果页并抽取链接。输入 `proxy off` 可关闭对其余网站的代理。代理、书签和图片偏好只保存在当前浏览器的 `localStorage`。
+默认 `proxy auto`：先直接读取页面，若网站拦截跨域，再经 [Jina Reader](https://r.jina.ai/) 重试；成功时状态栏显示 `via jina`。站内搜索汇总 Google / Bing / 百度结果时也会使用 Jina。输入 `proxy off` 可完全禁止代理；`proxy on` 表示始终允许。代理、书签和图片偏好只保存在当前浏览器的 `localStorage`。
 
 ### 实现
 
@@ -138,7 +138,7 @@ Search never leaves USC for an engine UI. USC fetches engine results, unwraps re
 | `real` / `real <n>` | Open the current page / link n in the system browser |
 | `find <text>` | Find text and report the match count |
 | `bookmark` / `bookmarks` | Save the current page / list bookmarks |
-| `proxy on` / `proxy off` | Enable / disable the Jina cross-origin fallback |
+| `proxy auto` / `on` / `off` | Auto / allow / disable the Jina cross-origin fallback (default auto) |
 | `theme dark/light/system` | Switch and remember the color theme |
 | `font +` / `font -` / `font reset` | Adjust and remember text size |
 | `copy` / `copy <n>` | Copy the current URL / link n |
@@ -153,7 +153,7 @@ With an empty prompt, Space scrolls down; `Esc` clears input and stops loading. 
 
 By default, USC only attempts a direct request from your browser. Many sites block cross-origin reads; USC does not silently disclose their URLs to a third party.
 
-Only after `proxy on` may failed URLs be sent to [Jina Reader](https://r.jina.ai/). Successful proxied pages show `via jina` in the status line. In-app search is the exception: querying Google / Bing / Baidu uses Jina to fetch result pages and extract links inside USC. Use `proxy off` to disable the proxy for other sites. Proxy choice, bookmarks, and image preference stay in this browser's `localStorage`.
+Default `proxy auto`: try a direct page read first, then fall back to [Jina Reader](https://r.jina.ai/) when the site blocks cross-origin access. Successful proxied pages show `via jina` in the status line. In-app search also uses Jina to fetch Google / Bing / Baidu result pages and extract links. Use `proxy off` to disable the proxy entirely, or `proxy on` to always allow it. Proxy choice, bookmarks, and image preference stay in this browser's `localStorage`.
 
 ### Implementation
 

@@ -68,6 +68,8 @@ assert.deepStrictEqual(USC.parseLine("img 4"), { type: "img", which: 4 });
 assert.deepStrictEqual(USC.parseLine("img all"), { type: "img", which: "all" });
 assert.deepStrictEqual(USC.parseLine("images on"), { type: "images", mode: "on" });
 assert.deepStrictEqual(USC.parseLine("proxy on"), { type: "proxy", mode: "on" });
+assert.deepStrictEqual(USC.parseLine("proxy auto"), { type: "proxy", mode: "auto" });
+assert.deepStrictEqual(USC.parseLine("proxy off"), { type: "proxy", mode: "off" });
 assert.deepStrictEqual(USC.parseLine("theme light"), { type: "theme", mode: "light" });
 assert.deepStrictEqual(USC.parseLine("font +"), { type: "font", value: "+" });
 assert.deepStrictEqual(USC.parseLine("font 18"), { type: "font", value: "18" });
@@ -253,7 +255,7 @@ var originalFetch = global.fetch;
     calls += 1;
     return Promise.reject(new TypeError("cors"));
   };
-  await assert.rejects(Browser.fetchPage("https://example.com"), /proxy on/);
+  await assert.rejects(Browser.fetchPage("https://example.com"), /proxy auto/);
   assert.strictEqual(calls, 1, "proxy must be opt-in");
 
   global.fetch = function () {
