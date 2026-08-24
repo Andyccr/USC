@@ -209,14 +209,17 @@ assert.strictEqual(
 
 var bingSample =
   "Title: hello - Bing\nURL Source: https://www.bing.com/search?q=hello\n\nMarkdown Content:\n" +
+  "1.   [![Image 12: Global web icon](https://th.bing.com/th/id/ODLS.ABC?w=32) wikipedia.org https://en.wikipedia.org › wiki › Hello](https://www.bing.com/ck/a?!&&u=a1aHR0cHM6Ly9lbi53aWtpcGVkaWEub3JnL3dpa2kvSGVsbG8&ntb=1)\n" +
   "## [**Hello** - **Wikipedia**](https://www.bing.com/ck/a?!&&u=a1aHR0cHM6Ly9lbi53aWtpcGVkaWEub3JnL3dpa2kvSGVsbG8&ntb=1)\n" +
   "Hello is a greeting.\n" +
   "## [Skip to content](https://www.bing.com/search?q=hello#)\n";
 var extracted = USC.extractSearchResults(bingSample, "bing");
-assert.strictEqual(extracted.length, 1);
+assert.strictEqual(extracted.length, 1, "icon/thumbnail links must not become results");
 assert.strictEqual(extracted[0].title, "Hello - Wikipedia");
 assert.strictEqual(extracted[0].url, "https://en.wikipedia.org/wiki/Hello");
 assert.ok(extracted[0].snippet.indexOf("greeting") >= 0);
+assert.strictEqual(USC.isImageUrl("https://th.bing.com/th/id/ODLS.ABC"), true);
+assert.strictEqual(USC.isImageUrl("https://en.wikipedia.org/wiki/Hello"), false);
 
 var ddgSample =
   "1.[Quantum computing - Wikipedia](https://duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FQuantum_computing&rut=x)\n" +

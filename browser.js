@@ -466,11 +466,14 @@
     if (!isSafeHttpUrl(abs)) {
       return Promise.reject(new Error("blocked url"));
     }
+    // Text-browser default: prefer Jina markdown (readable plain text) over raw HTML chrome.
+    var preferMarkdown = opts.format !== "html";
     if (opts.forceProxy) {
-      return fetchJina(abs, signal, opts.format === "html" ? "html" : "markdown").catch(function (err) {
+      var first = preferMarkdown ? "markdown" : "html";
+      var second = preferMarkdown ? "html" : "markdown";
+      return fetchJina(abs, signal, first).catch(function (err) {
         if (err && err.name === "AbortError") throw err;
-        if (opts.format === "html") throw err;
-        return fetchJina(abs, signal, "html");
+        return fetchJina(abs, signal, second);
       });
     }
     return fetchDirect(abs, signal)
@@ -481,11 +484,11 @@
           blocked.proxyDisabled = true;
           throw blocked;
         }
-        return fetchJina(abs, signal, "html");
+        return fetchJina(abs, signal, preferMarkdown ? "markdown" : "html");
       })
       .catch(function (err) {
         if (err && (err.name === "AbortError" || err.proxyDisabled)) throw err;
-        return fetchJina(abs, signal, "markdown");
+        return fetchJina(abs, signal, preferMarkdown ? "html" : "markdown");
       });
   }
 

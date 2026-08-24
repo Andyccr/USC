@@ -143,7 +143,7 @@
     "number to follow a link\n" +
     "\n" +
     "back     home     help\n" +
-    "i 1      load image 1\n" +
+    "i 1      load image link 1\n" +
     "i on     always load images\n" +
     "proxy     auto / on / off\n" +
     "theme     dark / light / system\n" +
@@ -155,7 +155,7 @@
     "real     open outside\n" +
     ":cmd     any command\n" +
     "\n" +
-    "search and pages stay inside USC\n";
+    "pages stay as text · images stay as links\n";
 
   function listFrom(value) {
     if (!Array.isArray(value)) return [];
@@ -448,9 +448,38 @@
     }
   }
 
+  function isImageUrl(url) {
+    try {
+      var u = new URL(url);
+      var host = u.hostname.replace(/^www\./, "").toLowerCase();
+      var path = u.pathname.toLowerCase();
+      if (/\.(png|jpe?g|gif|webp|svg|ico|bmp|avif)(\?|$)/i.test(path)) return true;
+      if (host.indexOf("th.bing.com") >= 0) return true;
+      if (host.indexOf("tse") === 0 && host.indexOf("bing.net") >= 0) return true;
+      if (host.indexOf("gstatic.com") >= 0) return true;
+      if (host.indexOf("googleusercontent.com") >= 0 && path.indexOf("/images") >= 0) return true;
+      if (host.indexOf("bdstatic.com") >= 0) return true;
+      if (host.indexOf("duckduckgo.com") >= 0 && (path.indexOf("/i/") >= 0 || path.indexOf("/iu/") >= 0)) {
+        return true;
+      }
+      if (host.indexOf("external-content.duckduckgo.com") >= 0) return true;
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function stripMarkdownImages(line) {
+    return String(line || "")
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function cleanResultTitle(title) {
     return String(title || "")
       .replace(/\*+/g, "")
+      .replace(/!\[[^\]]*\]/g, "")
       .replace(/\s+/g, " ")
       .replace(/^#+\s*/, "")
       .trim();
@@ -469,7 +498,9 @@
     title = cleanResultTitle(title);
     if (!title || title.length < 2) return false;
     if (NOISE_TITLES[title.toLowerCase()]) return false;
+    if (/^!\[/.test(title) || /^image\s*\d*/i.test(title)) return false;
     if (/^https?:\/\//i.test(title) && title === url) return false;
+    if (isImageUrl(url)) return false;
     try {
       var u = new URL(url);
       if (u.protocol !== "http:" && u.protocol !== "https:") return false;
@@ -478,6 +509,9 @@
       if (kind && isSearchEngineResultPage(url)) return false;
       if (kind === "bing" && (u.pathname.indexOf("/ck/") === 0 || u.pathname === "/")) return false;
       if (kind === "google" && (u.pathname === "/" || u.pathname === "/webhp")) return false;
+      if (kind === "baidu" && (u.pathname.indexOf("/baidu.php") === 0 || u.hostname.indexOf("hao123") >= 0)) {
+        return false;
+      }
       if (kind === "duckduckgo" && u.pathname.indexOf("/l/") !== 0 && !u.searchParams.get("uddg")) {
         if (u.pathname === "/" || u.pathname.indexOf("/lite") === 0 || u.pathname.indexOf("/html") === 0) {
           return false;
@@ -500,8 +534,15 @@
     function pushResult(title, href, snippet) {
       var url = unwrapRedirectUrl(href);
       title = cleanResultTitle(title);
+      // Nested image-markdown often leaves junk titles like "wikipedia.org https://…"
+      title = title
+        .replace(/\s*https?:\/\/\S+/g, "")
+        .replace(/\s*[›>].*$/, "")
+        .replace(/\s+/g, " ")
+        .trim();
       snippet = String(snippet || "")
         .replace(/\*+/g, "")
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
         .replace(/\s+/g, " ")
         .trim();
       if (!isUsefulResult(title, url)) return;
@@ -516,32 +557,45 @@
       });
     }
 
-    for (var i = 0; i < lines.length && results.length < RESULT_LIMIT; i++) {
-      var line = lines[i].trim();
-      if (!line) continue;
-      var heading = line.match(/^#{1,6}\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
-      var numbered = line.match(/^\d+\.\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
-      var plain = line.match(/^\[([^\]]{3,120})\]\((https?:[^)]+)\)\s*$/);
-      var hit = heading || numbered || plain;
-      if (!hit) continue;
-      var snippet = "";
-      for (var j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-        var next = lines[j].trim();
+    function snippetAfter(start) {
+      for (var j = start + 1; j < Math.min(start + 5, lines.length); j++) {
+        var next = stripMarkdownImages(lines[j]);
         if (!next) continue;
-        if (/^#{1,3}\s*\[/.test(next) || /^\d+\.\s*\[/.test(next)) break;
-        if (/^!\[/.test(next)) continue;
-        if (/^\[[^\]]{1,40}\]\(https?:/.test(next) && next.length < 80) continue;
-        snippet = next.replace(/^\[[^\]]*\]\((https?:[^)]+)\)/, "").trim() || next;
-        snippet = snippet.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-        if (snippet) break;
+        if (/^#{1,6}\s*\[/.test(next) || /^\d+\.\s*\[/.test(next)) break;
+        if (/^\[[^\]]{1,40}\]\(https?:/.test(next) && next.length < 90) continue;
+        next = next.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+        if (next) return next;
       }
-      pushResult(hit[1], hit[2], snippet);
+      return "";
     }
 
+    // Pass 1: heading links are the cleanest SERP signal (Bing/Google/Baidu).
+    for (var i = 0; i < lines.length && results.length < RESULT_LIMIT; i++) {
+      var headingLine = stripMarkdownImages(lines[i]);
+      var heading = headingLine.match(/^#{1,6}\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
+      if (!heading) continue;
+      pushResult(heading[1], heading[2], snippetAfter(i));
+    }
+
+    // Pass 2: numbered / plain links after stripping nested icons.
+    if (results.length < 3) {
+      for (var n = 0; n < lines.length && results.length < RESULT_LIMIT; n++) {
+        var line = stripMarkdownImages(lines[n]);
+        if (!line) continue;
+        var numbered = line.match(/^\d+\.\s*\[([^\]]+)\]\((https?:[^)]+)\)/);
+        var plain = line.match(/^\[([^\]]{3,120})\]\((https?:[^)]+)\)\s*$/);
+        var hit = numbered || plain;
+        if (!hit) continue;
+        pushResult(hit[1], hit[2], snippetAfter(n));
+      }
+    }
+
+    // Pass 3: last-resort scan, still image-filtered.
     if (!results.length) {
+      var cleaned = stripMarkdownImages(md);
       var re = /\[([^\]]{3,120})\]\((https?:[^)]+)\)/g;
       var m;
-      while ((m = re.exec(md)) && results.length < RESULT_LIMIT) {
+      while ((m = re.exec(cleaned)) && results.length < RESULT_LIMIT) {
         pushResult(m[1], m[2], "");
       }
     }
@@ -996,11 +1050,14 @@
             page.appendChild(img);
             page.appendChild(doc.createTextNode("\n"));
           } else {
-            var ph = doc.createElement("button");
-            ph.type = "button";
-            ph.className = "imgph";
+            // Pure text browser: images are links until the user chooses to load them.
+            var ph = doc.createElement("a");
+            ph.className = "ln imgph";
+            ph.href = "#";
             ph.setAttribute("data-image", String(tok.n));
+            ph.setAttribute("data-url", tok.url);
             ph.setAttribute("aria-label", "Load image " + tok.n);
+            ph.title = tok.url;
             ph.textContent = "[img:" + tok.n + (tok.alt ? " " + tok.alt : "") + "]";
             page.appendChild(ph);
           }
@@ -1157,6 +1214,24 @@
         printMsg("search engine UI skipped · stay in USC", "err");
         return;
       }
+      // Pure text browser: image URLs stay as clickable [img] links, not auto-loaded.
+      if (isImageUrl(abs)) {
+        cancelPending();
+        var imageDoc = Browser.markdownToDocument(
+          "Title: image\nURL Source: " +
+            abs +
+            "\n\nMarkdown Content:\nimage\n\n![image](" +
+            abs +
+            ")\n\n" +
+            abs +
+            "\n\ni 1  load this image\n",
+          abs
+        );
+        imageDoc.via = "image-link";
+        applyImageMode(imageDoc);
+        setCurrent(imageDoc, nav || "push");
+        return;
+      }
       if (abortCtrl) abortCtrl.abort();
       var controller = typeof AbortController === "function" ? new AbortController() : null;
       abortCtrl = controller;
@@ -1172,17 +1247,38 @@
       var hit = cache[abs];
       // auto (default) and on both allow Jina when CORS blocks reading.
       var allowProxy = proxyMode !== "off" || isSearchEngineUrl(abs);
+      // Secondary pages from in-app search always prefer Jina markdown text.
+      var fromSearch =
+        (current && current.url && String(current.url).indexOf("usc.local/search") >= 0) ||
+        isSearchEngineUrl(abs);
       var req = hit
         ? Promise.resolve(hit)
         : Browser.fetchPage(abs, {
             signal: controller && controller.signal,
-            proxy: allowProxy
+            proxy: allowProxy,
+            forceProxy: allowProxy && fromSearch,
+            format: "markdown"
           });
       req
         .then(function (fetched) {
-          clearTimeout(loadTimer);
           if (ticket !== going) return;
-          setLoading(false);
+          // If direct fetch returned a bare image, keep it as an image-link page.
+          if (fetched.via === "direct-image" || isImageUrl(fetched.url || abs)) {
+            clearTimeout(loadTimer);
+            setLoading(false);
+            var onlyImage = Browser.markdownToDocument(
+              "Title: image\nURL Source: " +
+                (fetched.url || abs) +
+                "\n\nMarkdown Content:\nimage\n\n![image](" +
+                (fetched.url || abs) +
+                ")\n",
+              fetched.url || abs
+            );
+            onlyImage.via = fetched.via || "image-link";
+            applyImageMode(onlyImage);
+            setCurrent(onlyImage, nav || "push");
+            return;
+          }
           var raw = fetched.text.slice(0, MAX_RAW);
           var stored = { url: fetched.url || abs, text: raw, via: fetched.via };
           cachePut(abs, stored);
@@ -1191,6 +1287,33 @@
           documentModel.raw = raw;
           documentModel.via = fetched.via;
           applyImageMode(documentModel);
+          // Empty / near-empty parses: retry once via Jina markdown for readable text.
+          var plain = Browser.pageToPlainText(documentModel).replace(/\s+/g, " ").trim();
+          if (
+            allowProxy &&
+            fetched.via.indexOf("jina-") !== 0 &&
+            plain.length < 120
+          ) {
+            setStatus("retry text…");
+            return Browser.fetchPage(abs, {
+              signal: controller && controller.signal,
+              forceProxy: true,
+              format: "markdown"
+            }).then(function (again) {
+              clearTimeout(loadTimer);
+              if (ticket !== going) return;
+              setLoading(false);
+              var raw2 = again.text.slice(0, MAX_RAW);
+              cachePut(abs, { url: again.url || abs, text: raw2, via: again.via });
+              var retryDoc = Browser.parseFetched(raw2, again.url || abs);
+              retryDoc.raw = raw2;
+              retryDoc.via = again.via;
+              applyImageMode(retryDoc);
+              setCurrent(retryDoc, nav || "push");
+            });
+          }
+          clearTimeout(loadTimer);
+          setLoading(false);
           setCurrent(documentModel, nav || "push");
         })
         .catch(function (err) {
@@ -1787,9 +1910,10 @@
     function followDataLink(event) {
       var el = eventElement(event.target);
       if (!el || !el.closest) return false;
-      var imageButton = el.closest("button[data-image]");
+      var imageButton = el.closest("[data-image]");
       if (imageButton) {
         event.preventDefault();
+        if (typeof event.stopPropagation === "function") event.stopPropagation();
         loadImages(parseInt(imageButton.getAttribute("data-image"), 10));
         return true;
       }
@@ -1899,6 +2023,7 @@
     extractSearchResults: extractSearchResults,
     mergeSearchResults: mergeSearchResults,
     buildSearchDocument: buildSearchDocument,
+    isImageUrl: isImageUrl,
     isInternalSearchUrl: isInternalSearchUrl,
     internalSearchQuery: internalSearchQuery,
     internalSearchUrl: internalSearchUrl,
