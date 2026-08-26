@@ -366,7 +366,7 @@
     var linkMap = {};
 
     function addLink(label, url) {
-      url = resolveUrl(url, source);
+      url = resolveUrl(String(url || "").replace(/^\s*<\s*|\s*>\s*$/g, ""), source);
       if (!isSafeHttpUrl(url)) return;
       var text = decodeEntities(label).replace(/\s+/g, " ").trim() || url;
       var key = url + "\n" + text;
@@ -379,31 +379,88 @@
       tokens.push({ t: "link", n: n, v: text, url: url });
     }
 
-    var lines = md.split("\n");
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (tokens.length) tokens.push({ t: "nl" });
-      var rest = line;
-      var re = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)/g;
-      var last = 0;
-      var mm;
-      while ((mm = re.exec(line))) {
-        if (mm.index > last) tokens.push({ t: "text", v: line.slice(last, mm.index) });
-        if (mm[2]) {
-          var imgUrl = resolveUrl(mm[2], source);
-          if (isSafeHttpUrl(imgUrl) && images.length < MAX_IMAGES) {
-            var alt = (mm[1] || "").trim();
-            var n = images.length + 1;
-            images.push({ n: n, alt: alt, url: imgUrl, loaded: false });
-            tokens.push({ t: "img", n: n, alt: alt, url: imgUrl });
-          }
-        } else {
-          addLink(mm[3], mm[4]);
-        }
-        last = mm.index + mm[0].length;
+    function readMdUrl(line, openIdx) {
+      // openIdx points at '(' of ](url) or ](<url>)
+      var i = openIdx + 1;
+      while (i < line.length && /\s/.test(line.charAt(i))) i += 1;
+      if (line.charAt(i) === "<") {
+        var close = line.indexOf(">", i + 1);
+        if (close < 0) return null;
+        var end = close + 1;
+        while (end < line.length && line.charAt(end) !== ")") end += 1;
+        if (line.charAt(end) !== ")") return null;
+        return { url: line.slice(i + 1, close), end: end + 1 };
       }
-      rest = line.slice(last);
-      if (rest) tokens.push({ t: "text", v: rest });
+      var depth = 0;
+      var start = i;
+      for (; i < line.length; i++) {
+        var ch = line.charAt(i);
+        if (ch === "(") depth += 1;
+        else if (ch === ")") {
+          if (!depth) return { url: line.slice(start, i), end: i + 1 };
+          depth -= 1;
+        } else if (/\s/.test(ch) && !depth) {
+          // whitespace ends unbracketed markdown destinations
+          return null;
+        }
+      }
+      return null;
+    }
+
+    function consumeInline(line) {
+      var i = 0;
+      while (i < line.length) {
+        if (line.charAt(i) === "!" && line.charAt(i + 1) === "[") {
+          var altEnd = line.indexOf("]", i + 2);
+          if (altEnd >= 0 && line.charAt(altEnd + 1) === "(") {
+            var imgDest = readMdUrl(line, altEnd + 1);
+            if (imgDest) {
+              if (i > 0) {
+                /* preceding text handled below via last */
+              }
+              var imgUrl = resolveUrl(imgDest.url.replace(/^\s*<\s*|\s*>\s*$/g, ""), source);
+              if (isSafeHttpUrl(imgUrl) && images.length < MAX_IMAGES) {
+                var alt = (line.slice(i + 2, altEnd) || "").trim();
+                var nImg = images.length + 1;
+                images.push({ n: nImg, alt: alt, url: imgUrl, loaded: false });
+                tokens.push({ t: "img", n: nImg, alt: alt, url: imgUrl });
+              }
+              i = imgDest.end;
+              continue;
+            }
+          }
+        }
+        if (line.charAt(i) === "[") {
+          var labelEnd = line.indexOf("]", i + 1);
+          if (labelEnd >= 0 && line.charAt(labelEnd + 1) === "(") {
+            var linkDest = readMdUrl(line, labelEnd + 1);
+            if (linkDest) {
+              addLink(line.slice(i + 1, labelEnd), linkDest.url);
+              i = linkDest.end;
+              continue;
+            }
+          }
+        }
+        var nextBang = line.indexOf("![", i + 1);
+        var nextLink = line.indexOf("[", i + 1);
+        var next = line.length;
+        if (nextBang >= 0) next = Math.min(next, nextBang);
+        if (nextLink >= 0) next = Math.min(next, nextLink);
+        // If current char didn't start a mark, emit text through next candidate.
+        if (line.charAt(i) !== "[" && !(line.charAt(i) === "!" && line.charAt(i + 1) === "[")) {
+          tokens.push({ t: "text", v: line.slice(i, next) });
+          i = next;
+          continue;
+        }
+        tokens.push({ t: "text", v: line.charAt(i) });
+        i += 1;
+      }
+    }
+
+    var lines = md.split("\n");
+    for (var li = 0; li < lines.length; li++) {
+      if (tokens.length) tokens.push({ t: "nl" });
+      consumeInline(lines[li]);
     }
     return {
       title: title || hostOf(source) || "untitled",

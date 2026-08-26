@@ -238,6 +238,31 @@ assert.ok(built.links.some(function (link) {
   return link.url.indexOf("usc.local/search") >= 0;
 }));
 
+assert.strictEqual(
+  Browser.markdownToDocument(
+    "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n[Python (programming language)](https://en.wikipedia.org/wiki/Python_(programming_language))\n",
+    "https://ex.com/"
+  ).links[0].url,
+  "https://en.wikipedia.org/wiki/Python_(programming_language)"
+);
+assert.strictEqual(
+  Browser.markdownToDocument(
+    "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n[x](<https://en.wikipedia.org/wiki/Foo_(bar)>)\n",
+    "https://ex.com/"
+  ).links[0].url,
+  "https://en.wikipedia.org/wiki/Foo_(bar)"
+);
+
+var builtParen = USC.buildSearchDocument(
+  "python",
+  [{ title: "Python (programming language)", url: "https://en.wikipedia.org/wiki/Python_(programming_language)", snippet: "A language." }],
+  {}
+);
+assert.strictEqual(
+  builtParen.links[0].url,
+  "https://en.wikipedia.org/wiki/Python_(programming_language)"
+);
+
 var originalFetch = global.fetch;
 
 (async function () {

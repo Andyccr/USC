@@ -103,9 +103,17 @@
       border-bottom: 1px solid var(--line);
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
+      cursor: pointer;
     }
     #page a.ln:hover { border-bottom-color: var(--fg); }
     #page a.ln:active { color: var(--dim); }
+    body.search-results #page a.ln {
+      display: inline-block;
+      max-width: 100%;
+      padding: 0.45em 0;
+      line-height: 1.45;
+      border-bottom-color: var(--line);
+    }
     #page .imgph {
       color: var(--dim);
       background: transparent;
