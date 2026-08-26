@@ -48,7 +48,9 @@ python3 -m http.server 8765
 | `s <词>` | 强制搜索与命令同名的词，例如 `s back` |
 | `real` / `real <n>` | 在系统浏览器中打开当前页 / 链接 n |
 | `find <词>` | 页内查找 |
-| `bookmark` / `bookmarks` | 保存当前页 / 查看书签 |
+| `bookmark` / `star` / `bookmarks` | 收藏当前页（再一次取消）/ 打开书签 |
+| `history` / `resume` | 本会话历史 / 打开上次页面 |
+| `settings` | 主题、代理、图片、字号、清空最近 |
 | `proxy auto` / `on` / `off` | 自动 / 允许 / 禁止 Jina（默认 `auto`） |
 | `theme` / `theme dark` / `light` / `system` | 循环或指定明暗（也可用右下角按钮或 `Alt+T`） |
 | `font +` / `-` / `reset` | 字号 |
@@ -69,7 +71,7 @@ python3 -m http.server 8765
 3. 状态栏出现 `via jina` 表示走了代理  
 
 站内搜索、以及从搜索结果打开的二级页，为了稳定拿到正文，会优先经 Jina 取 markdown。  
-`proxy off` 完全禁止代理；`proxy on` 始终允许。偏好存在 `localStorage`。
+`proxy off` 完全禁止代理；`proxy on` 始终允许。偏好存在 `localStorage`。刷新后首页会显示 **continue**（上次页面或搜索）和 **recent**；`resume` 直接打开上次内容。
 
 ---
 
@@ -82,9 +84,12 @@ index.html     纯文本 UI、明暗主题、手机适配
 favicon.svg    图标
 manifest.json  可安装为应用
 browser.js     取页、CORS/Jina、HTML/Markdown → 文档模型、纯文本导出
-usc.js         命令解析、搜索流水线、历史/书签、主题、渲染与交互
+library.js     本地知识层：最近/继续/书签、首页与设置等产品页
+usc.js         命令解析、搜索流水线、历史栈、主题、渲染与交互
 usc.test.js    无依赖单元测试
 ```
+
+产品页（首页、设置、历史、书签、帮助、关于）都是 **usc.local 上的 markdown 文档**，走同一套 `go` / 点击 / `paint`，而不是另一套 UI。
 
 #### 总览
 
@@ -102,6 +107,11 @@ flowchart TB
     PAINT["paint 纯文本渲染"]
   end
 
+  subgraph LIB["library.js"]
+    HOME["home / settings / history / bookmarks"]
+    SESSION["recents + last · localStorage"]
+  end
+
   subgraph CORE["browser.js"]
     FETCH["fetchPage"]
     DIRECT["fetchDirect"]
@@ -111,9 +121,12 @@ flowchart TB
 
   CHROME -->|Enter| PARSE
   PARSE -->|search| SEARCH
-  PARSE -->|go / follow| NAV
+  PARSE -->|go / follow / 本地页| NAV
   SEARCH -->|结果页文档| PAINT
-  NAV --> FETCH
+  NAV -->|usc.local 产品页| HOME
+  HOME --> SESSION
+  SESSION --> PAINT
+  NAV -->|http(s)| FETCH
   FETCH --> DIRECT
   DIRECT -->|失败且允许代理| JINA
   DIRECT --> DOC
@@ -250,12 +263,15 @@ The `dark` / `light` / `auto` control at the bottom right cycles appearance. The
 | `g` / `b` / `d` | Google / Bing / Baidu only |
 | `s <query>` | Search a reserved word |
 | `real` / `real <n>` | Open outside |
-| `find` / `bookmark(s)` / `proxy auto\|on\|off` | Find / bookmarks / proxy |
+| `find` / `star` / `bookmarks` | Find / save page (again to unstar) / bookmarks |
+| `history` / `resume` / `settings` | Session history / last page / preferences |
 | `theme` / `theme dark` / `light` / `system` | Cycle or set appearance (also the bottom-right control or `Alt+T`) |
 
 ### Cross-origin and privacy
 
 Default `proxy auto`: try a direct fetch, then [Jina Reader](https://r.jina.ai/) (markdown first) when blocked. In-app search and secondary pages from search prefer Jina markdown for stable article text. `proxy off` disables the proxy; `proxy on` always allows it.
+
+After a refresh, home shows **continue** (last page or search) and **recent**. `resume` opens the last item immediately.
 
 ---
 
@@ -268,9 +284,12 @@ index.html     Text UI, light/dark theme, mobile chrome
 favicon.svg    Icon
 manifest.json  Installable app shell
 browser.js     Fetch, Jina, HTML/Markdown → document model
-usc.js         Commands, search pipeline, history, theme, paint
+library.js     Local knowledge: recents, continue, bookmarks, start/settings pages
+usc.js         Commands, search pipeline, history stack, theme, paint
 usc.test.js    Dependency-free tests
 ```
+
+Product surfaces (home, settings, history, bookmarks, help, about) are **markdown documents on usc.local**, so they use the same `go` / click / `paint` path as articles.
 
 #### Overview
 
@@ -288,6 +307,11 @@ flowchart TB
     PAINT["paint"]
   end
 
+  subgraph LIB["library.js"]
+    HOME["home / settings / history / bookmarks"]
+    SESSION["recents + last"]
+  end
+
   subgraph CORE["browser.js"]
     FETCH["fetchPage"]
     DIRECT["direct"]
@@ -297,9 +321,12 @@ flowchart TB
 
   CHROME --> PARSE
   PARSE -->|search| SEARCH
-  PARSE -->|follow| NAV
+  PARSE -->|follow / local page| NAV
   SEARCH --> PAINT
-  NAV --> FETCH
+  NAV -->|usc.local| HOME
+  HOME --> SESSION
+  SESSION --> PAINT
+  NAV -->|http(s)| FETCH
   FETCH --> DIRECT
   DIRECT -->|fail + proxy| JINA
   DIRECT --> DOC

@@ -98,21 +98,28 @@
       overflow-wrap: anywhere;
     }
     body.home #page {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      color: var(--dim);
+      display: block;
+      text-align: left;
+      color: var(--fg);
+      padding-top: 36px;
     }
     body.home #page .mark {
       font-size: 22px;
       letter-spacing: 0.28em;
       color: var(--fg);
     }
-    body.home #page .hint {
-      display: block;
-      margin-top: 18px;
-      letter-spacing: 0.04em;
+    body.home #page .sec,
+    body.library #page .sec {
+      color: var(--dim);
+    }
+    body.home #page a.ln,
+    body.library #page a.ln {
+      display: inline-block;
+      max-width: 100%;
+      padding: 0.35em 0;
+      line-height: 1.45;
+    }
+    body.home #status {
       color: var(--dim);
     }
     #page a.ln {
@@ -180,7 +187,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    body.home #status { color: transparent; }
+    body.home #status { color: var(--dim); }
     #msg:empty, #hint:empty { display: none; }
     #msg, #hint {
       color: var(--dim);
@@ -311,6 +318,7 @@
   </div>
   <noscript>USC 需要 JavaScript。</noscript>
   <script src="browser.js"></script>
+  <script src="library.js"></script>
   <script src="usc.js"></script>
 </body>
 </html>
