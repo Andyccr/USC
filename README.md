@@ -50,13 +50,15 @@ python3 -m http.server 8765
 | `find <词>` | 页内查找 |
 | `bookmark` / `bookmarks` | 保存当前页 / 查看书签 |
 | `proxy auto` / `on` / `off` | 自动 / 允许 / 禁止 Jina（默认 `auto`） |
-| `theme dark/light/system` | 主题 |
+| `theme` / `theme dark` / `light` / `system` | 循环或指定明暗（也可用右下角按钮或 `Alt+T`） |
 | `font +` / `-` / `reset` | 字号 |
 | `copy` / `copy <n>` | 复制当前 URL / 链接 n |
 | `share` | 系统分享，失败则复制 URL |
 | `top` / `bottom` | 跳到顶部 / 底部 |
 
-输入 `:` 打开命令联想。空输入时按空格翻页；`Esc` 停止加载。
+输入 `:` 打开命令联想。空输入时按空格翻页；`Esc` 停止加载。`Ctrl/Cmd + L` 聚焦输入，`Alt + T` 循环主题。
+
+右下角 `dark` / `light` / `auto` 可点：暗色 → 亮色 → 跟随系统。偏好保存在本机。
 
 ### 跨域与隐私
 
@@ -76,9 +78,11 @@ python3 -m http.server 8765
 #### 文件职责
 
 ```text
-index.html     纯文本 UI（正文区 + 状态 + 提示 + 输入框），含手机适配样式
+index.html     纯文本 UI、明暗主题、手机适配
+favicon.svg    图标
+manifest.json  可安装为应用
 browser.js     取页、CORS/Jina、HTML/Markdown → 文档模型、纯文本导出
-usc.js         命令解析、搜索流水线、历史/书签、渲染与交互
+usc.js         命令解析、搜索流水线、历史/书签、主题、渲染与交互
 usc.test.js    无依赖单元测试
 ```
 
@@ -231,7 +235,9 @@ The bottom field is both search box and address bar:
 - Type a URL → read that page as text  
 - Images stay `[img:n …]` links until click / `i n`
 
-Search-engine UIs never become the USC page. Use `real` / `real <n>` for the system browser.
+Type `:` to open command suggestions. With an empty prompt, Space scrolls; `Esc` stops loading. `Ctrl/Cmd + L` focuses the prompt, `Alt + T` cycles the theme.
+
+The `dark` / `light` / `auto` control at the bottom right cycles appearance. The choice is stored in this browser.
 
 ### Common commands
 
@@ -245,7 +251,7 @@ Search-engine UIs never become the USC page. Use `real` / `real <n>` for the sys
 | `s <query>` | Search a reserved word |
 | `real` / `real <n>` | Open outside |
 | `find` / `bookmark(s)` / `proxy auto\|on\|off` | Find / bookmarks / proxy |
-| `theme` / `font` / `copy` / `share` / `top` / `bottom` | UI utilities |
+| `theme` / `theme dark` / `light` / `system` | Cycle or set appearance (also the bottom-right control or `Alt+T`) |
 
 ### Cross-origin and privacy
 
@@ -258,9 +264,11 @@ Default `proxy auto`: try a direct fetch, then [Jina Reader](https://r.jina.ai/)
 #### Files
 
 ```text
-index.html     Text UI + mobile chrome
+index.html     Text UI, light/dark theme, mobile chrome
+favicon.svg    Icon
+manifest.json  Installable app shell
 browser.js     Fetch, Jina, HTML/Markdown → document model
-usc.js         Commands, search pipeline, history, paint
+usc.js         Commands, search pipeline, history, theme, paint
 usc.test.js    Dependency-free tests
 ```
 

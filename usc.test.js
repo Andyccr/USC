@@ -71,6 +71,13 @@ assert.deepStrictEqual(USC.parseLine("proxy on"), { type: "proxy", mode: "on" })
 assert.deepStrictEqual(USC.parseLine("proxy auto"), { type: "proxy", mode: "auto" });
 assert.deepStrictEqual(USC.parseLine("proxy off"), { type: "proxy", mode: "off" });
 assert.deepStrictEqual(USC.parseLine("theme light"), { type: "theme", mode: "light" });
+assert.deepStrictEqual(USC.parseLine("theme"), { type: "theme", mode: "cycle" });
+assert.deepStrictEqual(USC.parseLine("theme auto"), { type: "theme", mode: "system" });
+assert.deepStrictEqual(USC.parseLine("about"), { type: "about" });
+assert.strictEqual(USC.nextTheme("dark"), "light");
+assert.strictEqual(USC.nextTheme("light"), "system");
+assert.strictEqual(USC.nextTheme("system"), "dark");
+assert.strictEqual(USC.themeLabel("system"), "auto");
 assert.deepStrictEqual(USC.parseLine("font +"), { type: "font", value: "+" });
 assert.deepStrictEqual(USC.parseLine("font 18"), { type: "font", value: "18" });
 assert.deepStrictEqual(USC.parseLine("copy"), { type: "copy", index: 0 });

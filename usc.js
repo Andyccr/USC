@@ -37,6 +37,7 @@
     ":save",
     ":top",
     ":bottom",
+    ":theme",
     ":theme dark",
     ":theme light",
     ":theme system",
@@ -146,16 +147,39 @@
     "i 1      load image link 1\n" +
     "i on     always load images\n" +
     "proxy     auto / on / off\n" +
-    "theme     dark / light / system\n" +
+    "theme     tap / Alt+T · dark light auto\n" +
     "font +    adjust text size\n" +
     "copy      copy current URL\n" +
     "share     share current page\n" +
     "g hello  google only\n" +
     "s back   search a command word\n" +
     "real     open outside\n" +
+    "about     product info\n" +
     ":cmd     any command\n" +
     "\n" +
     "pages stay as text · images stay as links\n";
+
+  var ABOUT =
+    "USC  plain-text browser\n" +
+    "search · read · stay in-page\n" +
+    "\n" +
+    "theme    dark / light / auto\n" +
+    "         tap the label · Alt+T · theme\n" +
+    "proxy    auto (Jina when blocked)\n" +
+    "images   links until you load them\n" +
+    "\n" +
+    "no backend · no index · no account\n" +
+    "help     commands\n";
+
+  function nextTheme(mode) {
+    if (mode === "dark") return "light";
+    if (mode === "light") return "system";
+    return "dark";
+  }
+
+  function themeLabel(mode) {
+    return mode === "system" ? "auto" : mode === "light" ? "light" : "dark";
+  }
 
   function listFrom(value) {
     if (!Array.isArray(value)) return [];
@@ -193,7 +217,8 @@
     if (lower === "save") return { type: "save" };
     if (lower === "real") return { type: "real", index: 0 };
     if (lower === "proxy") return { type: "proxy", mode: "show" };
-    if (lower === "theme") return { type: "theme", mode: "show" };
+    if (lower === "theme") return { type: "theme", mode: "cycle" };
+    if (lower === "about") return { type: "about" };
     if (lower === "font") return { type: "font", value: "show" };
     if (lower === "copy") return { type: "copy", index: 0 };
     if (lower === "share") return { type: "share" };
@@ -211,9 +236,11 @@
       return { type: "go", url: rest };
     }
     if (head === "theme") {
+      if (rest === "auto") rest = "system";
       if (rest === "dark" || rest === "light" || rest === "system") {
         return { type: "theme", mode: rest };
       }
+      if (rest === "cycle" || rest === "toggle") return { type: "theme", mode: "cycle" };
       return { type: "usage", message: "theme dark|light|system" };
     } else if (head === "font") {
       if (rest === "+" || rest === "-" || rest === "reset" || /^\d{2}$/.test(rest)) {
@@ -820,6 +847,7 @@
     var form = doc.getElementById("prompt");
     var input = doc.getElementById("q");
     var promptLabel = form && form.querySelector("label");
+    var themeBtn = doc.getElementById("theme");
     if (!page || !status || !msg || !form || !input) return;
 
     var cmdHistory = [];
@@ -858,15 +886,30 @@
       if (themeMode === "system") doc.documentElement.removeAttribute("data-theme");
       else doc.documentElement.setAttribute("data-theme", themeMode);
       doc.documentElement.style.setProperty("--font-size", fontSize + "px");
+      var light =
+        themeMode === "light" ||
+        (themeMode === "system" &&
+          typeof matchMedia === "function" &&
+          matchMedia("(prefers-color-scheme: light)").matches);
       var themeMeta = doc.querySelector('meta[name="theme-color"]');
-      if (themeMeta) {
-        var light =
-          themeMode === "light" ||
-          (themeMode === "system" &&
-            typeof matchMedia === "function" &&
-            matchMedia("(prefers-color-scheme: light)").matches);
-        themeMeta.setAttribute("content", light ? "#f2f0e9" : "#141413");
+      if (themeMeta) themeMeta.setAttribute("content", light ? "#f2f0e9" : "#141413");
+      var appleBar = doc.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      if (appleBar) appleBar.setAttribute("content", light ? "default" : "black-translucent");
+      if (themeBtn) {
+        themeBtn.textContent = themeLabel(themeMode);
+        themeBtn.setAttribute(
+          "aria-label",
+          "Theme " + themeLabel(themeMode) + " · tap to cycle dark, light, auto"
+        );
       }
+    }
+
+    function setTheme(mode, quiet) {
+      if (mode !== "dark" && mode !== "light" && mode !== "system") return;
+      themeMode = mode;
+      storageSet(THEME_KEY, themeMode);
+      applyAppearance();
+      if (!quiet) printMsg("theme " + themeLabel(themeMode));
     }
 
     function updateProgress() {
@@ -1092,8 +1135,12 @@
       var hintLine = doc.createElement("div");
       hintLine.className = "hint";
       hintLine.textContent = "search or url";
+      var extra = doc.createElement("div");
+      extra.className = "hint";
+      extra.textContent = "theme  " + themeLabel(themeMode) + "  ·  help";
       wrap.appendChild(mark);
       wrap.appendChild(hintLine);
+      wrap.appendChild(extra);
       page.appendChild(wrap);
     }
 
@@ -1114,6 +1161,8 @@
       }
       if (view === "help") {
         paintTextView(HELP);
+      } else if (view === "about") {
+        paintTextView(ABOUT);
       } else if (!current) {
         paintTextView("");
       } else if (view === "links") {
@@ -1552,6 +1601,12 @@
         paint();
         return;
       }
+      if (cmd.type === "about") {
+        cancelPending();
+        view = "about";
+        paint();
+        return;
+      }
       if (cmd.type === "clear") {
         msg.textContent = "";
         return;
@@ -1655,12 +1710,13 @@
         return;
       }
       if (cmd.type === "theme") {
-        if (cmd.mode === "dark" || cmd.mode === "light" || cmd.mode === "system") {
-          themeMode = cmd.mode;
-          storageSet(THEME_KEY, themeMode);
-          applyAppearance();
+        if (cmd.mode === "cycle") setTheme(nextTheme(themeMode));
+        else if (cmd.mode === "dark" || cmd.mode === "light" || cmd.mode === "system") {
+          setTheme(cmd.mode);
+        } else {
+          printMsg("theme " + themeLabel(themeMode));
         }
-        printMsg("theme " + themeMode);
+        if (current && current.url === "https://usc.local/" && view === "page") paint();
         return;
       }
       if (cmd.type === "font") {
@@ -1997,9 +2053,25 @@
       });
     }
 
+    if (themeBtn) {
+      themeBtn.addEventListener("click", function (event) {
+        event.preventDefault();
+        handle({ type: "theme", mode: "cycle" }, "theme");
+      });
+    }
+
     doc.addEventListener("click", function (event) {
       var target = event.target;
-      if (target.closest && (target.closest("#page") || target.closest("a"))) return;
+      if (
+        target.closest &&
+        (target.closest("#page") ||
+          target.closest("a") ||
+          target.closest("#theme") ||
+          target.closest("button") ||
+          target.closest("#q"))
+      ) {
+        return;
+      }
       input.focus();
     });
 
@@ -2022,6 +2094,16 @@
         handle({ type: "forward" }, "forward");
         return;
       }
+      if (event.altKey && (event.key === "t" || event.key === "T")) {
+        event.preventDefault();
+        handle({ type: "theme", mode: "cycle" }, "theme");
+        return;
+      }
+      if (event.altKey && (event.key === "t" || event.key === "T")) {
+        event.preventDefault();
+        handle({ type: "theme", mode: "cycle" }, "theme");
+        return;
+      }
       if (
         event.key === "/" &&
         event.target !== input &&
@@ -2037,6 +2119,15 @@
     applyAppearance();
     setCurrent(homeDocument(), "initial");
     input.focus();
+
+    if (typeof matchMedia === "function") {
+      var scheme = matchMedia("(prefers-color-scheme: light)");
+      var onScheme = function () {
+        if (themeMode === "system") applyAppearance();
+      };
+      if (scheme.addEventListener) scheme.addEventListener("change", onScheme);
+      else if (scheme.addListener) scheme.addListener(onScheme);
+    }
 
     // Keep the prompt above the soft keyboard on mobile browsers.
     if (window.visualViewport) {
@@ -2057,6 +2148,8 @@
     ALL: ALL,
     ENGINES: ENGINES,
     parseLine: parseLine,
+    nextTheme: nextTheme,
+    themeLabel: themeLabel,
     suggestMany: suggestMany,
     isSearchEngineUrl: isSearchEngineUrl,
     isSearchEngineResultPage: isSearchEngineResultPage,
