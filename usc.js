@@ -2056,7 +2056,8 @@
     if (themeBtn) {
       themeBtn.addEventListener("click", function (event) {
         event.preventDefault();
-        handle({ type: "theme", mode: "cycle" }, "theme");
+        setTheme(nextTheme(themeMode), true);
+        if (current && current.url === "https://usc.local/" && view === "page") paint();
       });
     }
 
