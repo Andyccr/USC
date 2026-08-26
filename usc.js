@@ -463,6 +463,7 @@
         return true;
       }
       if (host.indexOf("external-content.duckduckgo.com") >= 0) return true;
+      if (path.indexOf("/y.js") >= 0) return true;
       return false;
     } catch (e) {
       return false;
@@ -517,6 +518,8 @@
           return false;
         }
       }
+      if (u.pathname.indexOf("/y.js") >= 0) return false;
+      if (u.hostname.indexOf("bing.com") >= 0 && u.pathname.indexOf("/th") === 0) return false;
       return true;
     } catch (e) {
       return false;
@@ -691,6 +694,10 @@
     return out;
   }
 
+  function mdHref(url) {
+    return "<" + String(url || "").replace(/[<>]/g, "") + ">";
+  }
+
   function buildSearchDocument(query, results, meta) {
     meta = meta || {};
     var hubUrl = internalSearchUrl(query);
@@ -708,17 +715,27 @@
     }
     for (var i = 0; i < results.length; i++) {
       var item = results[i];
-      md += "[" + item.title + "](" + item.url + ")\n";
+      var label = item.title.replace(/[\[\]]/g, "");
+      var host = "";
       try {
-        md += new URL(item.url).hostname.replace(/^www\./, "") + "\n";
+        host = new URL(item.url).hostname.replace(/^www\./, "");
       } catch (e) {}
-      if (item.snippet) md += item.snippet + "\n";
+      if (host) label += " · " + host;
+      md += "[" + label + "](" + mdHref(item.url) + ")\n";
+      if (item.snippet) {
+        md += item.snippet.replace(/\[/g, "(").replace(/\]/g, ")") + "\n";
+      }
       md += "\n";
     }
     if (meta.related && meta.related.length) {
       md += "related\n";
       for (var r = 0; r < meta.related.length; r++) {
-        md += "[" + meta.related[r] + "](" + internalSearchUrl(meta.related[r]) + ")\n";
+        md +=
+          "[" +
+          meta.related[r].replace(/[\[\]]/g, "") +
+          "](" +
+          mdHref(internalSearchUrl(meta.related[r])) +
+          ")\n";
       }
     }
     if (meta.footer) md += "\n" + meta.footer + "\n";
@@ -868,7 +885,7 @@
       if (href) {
         var link = doc.createElement("a");
         link.className = (className ? className + " " : "") + "ln";
-        link.href = "#";
+        link.href = "javascript:void(0)";
         link.setAttribute("data-url", href);
         link.title = href;
         link.textContent = text;
@@ -1018,11 +1035,12 @@
         } else if (tok.t === "link") {
           var a = doc.createElement("a");
           a.className = "ln";
-          // Keep navigation inside USC: never put the real URL in href.
-          a.href = "#";
+          // Avoid href="#" which rewrites the History API hash (#usc-N → #).
+          a.href = "javascript:void(0)";
           a.setAttribute("data-url", tok.url);
           a.title = tok.url;
           a.setAttribute("draggable", "false");
+          a.setAttribute("role", "link");
           appendFindText(a, "[" + tok.n + "] " + tok.v);
           page.appendChild(a);
         } else if (tok.t === "img") {
@@ -1050,14 +1068,13 @@
             page.appendChild(img);
             page.appendChild(doc.createTextNode("\n"));
           } else {
-            // Pure text browser: images are links until the user chooses to load them.
             var ph = doc.createElement("a");
             ph.className = "ln imgph";
-            ph.href = "#";
+            ph.href = "javascript:void(0)";
             ph.setAttribute("data-image", String(tok.n));
-            ph.setAttribute("data-url", tok.url);
             ph.setAttribute("aria-label", "Load image " + tok.n);
             ph.title = tok.url;
+            ph.setAttribute("role", "link");
             ph.textContent = "[img:" + tok.n + (tok.alt ? " " + tok.alt : "") + "]";
             page.appendChild(ph);
           }
@@ -1083,7 +1100,12 @@
     function paint() {
       findMatches = 0;
       var home = current && current.url === "https://usc.local/" && view === "page";
-      if (doc.body && doc.body.classList) doc.body.classList.toggle("home", !!home);
+      var searchPage =
+        current && current.url && String(current.url).indexOf("usc.local/search") >= 0 && view === "page";
+      if (doc.body && doc.body.classList) {
+        doc.body.classList.toggle("home", !!home);
+        doc.body.classList.toggle("search-results", !!searchPage);
+      }
       if (home) {
         paintHome();
         paintStatus();
@@ -1433,6 +1455,7 @@
         if (stackPos !== hubPos) return;
         var merged = mergeSearchResults(batches);
         var sources = sourcesOf();
+        var keepScroll = paintedOnce ? page.scrollTop : 0;
         var documentModel = buildSearchDocument(query, merged, {
           status: statusText || "",
           related: related,
@@ -1449,6 +1472,7 @@
         stack[hubPos] = documentModel;
         if (documentModel.title) doc.title = documentModel.title + " · USC";
         if (view === "page") paint();
+        if (paintedOnce) page.scrollTop = keepScroll;
         paintedOnce = true;
         if (isFinal) {
           setLoading(false);
@@ -1907,6 +1931,8 @@
       }, 280);
     });
 
+    var lastActivateAt = 0;
+
     function followDataLink(event) {
       var el = eventElement(event.target);
       if (!el || !el.closest) return false;
@@ -1914,6 +1940,9 @@
       if (imageButton) {
         event.preventDefault();
         if (typeof event.stopPropagation === "function") event.stopPropagation();
+        var nowImg = Date.now();
+        if (nowImg - lastActivateAt < 450) return true;
+        lastActivateAt = nowImg;
         loadImages(parseInt(imageButton.getAttribute("data-image"), 10));
         return true;
       }
@@ -1922,12 +1951,25 @@
       event.preventDefault();
       if (typeof event.stopPropagation === "function") event.stopPropagation();
       var target = a.getAttribute("data-url");
-      if (target) go(target, "push");
+      if (!target) return true;
+      var now = Date.now();
+      if (now - lastActivateAt < 450) return true;
+      lastActivateAt = now;
+      go(target, "push");
       return true;
     }
 
     page.addEventListener("click", followDataLink, true);
     msg.addEventListener("click", followDataLink, true);
+    // Mobile browsers sometimes drop click after a DOM refresh; pointerup is more reliable.
+    page.addEventListener(
+      "pointerup",
+      function (event) {
+        if (event.pointerType === "mouse") return;
+        followDataLink(event);
+      },
+      true
+    );
     page.addEventListener(
       "auxclick",
       function (event) {
