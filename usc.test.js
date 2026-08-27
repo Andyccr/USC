@@ -192,6 +192,7 @@ assert.strictEqual(
 );
 assert.strictEqual(USC.isInternalSearchUrl("https://usc.local/search?q=hi"), true);
 assert.strictEqual(USC.internalSearchQuery("https://usc.local/search?q=hi"), "hi");
+assert.strictEqual(USC.isInternalSearchUrl("https://usc.local/"), false);
 assert.strictEqual(USC.isInternalSearchUrl("https://www.google.com/search?q=hi"), false);
 assert.strictEqual(USC.isSearchEngineUrl("https://www.google.com/search?q=hi"), true);
 assert.strictEqual(USC.isSearchEngineUrl("https://www.google.co.uk/search?q=hi"), true);
@@ -269,6 +270,134 @@ assert.strictEqual(
   builtParen.links[0].url,
   "https://en.wikipedia.org/wiki/Python_(programming_language)"
 );
+
+assert.deepStrictEqual(USC.parseLine("settings"), { type: "settings" });
+assert.deepStrictEqual(USC.parseLine("prefs"), { type: "settings" });
+assert.deepStrictEqual(USC.parseLine("resume"), { type: "resume" });
+assert.deepStrictEqual(USC.parseLine("continue"), { type: "resume" });
+assert.deepStrictEqual(USC.parseLine("star"), { type: "bookmark", index: 0 });
+assert.deepStrictEqual(USC.parseLine("recents"), { type: "home" });
+assert.deepStrictEqual(USC.parseLine("history"), { type: "history" });
+assert.deepStrictEqual(USC.parseLine("bookmarks"), { type: "bookmarks" });
+
+var Library = require("./library.js");
+assert.strictEqual(Library.isHomeUrl("https://usc.local/"), true);
+assert.strictEqual(Library.isHomeUrl("https://usc.local"), true);
+assert.strictEqual(Library.isHomeUrl("https://en.wikipedia.org/wiki/Hello"), false);
+assert.strictEqual(Library.isSettingsUrl("https://usc.local/settings"), true);
+assert.strictEqual(Library.isHistoryUrl("https://usc.local/history"), true);
+assert.strictEqual(Library.isBookmarksUrl("https://usc.local/bookmarks"), true);
+assert.strictEqual(Library.isHelpUrl("https://usc.local/help"), true);
+assert.strictEqual(Library.isAppUrl("https://usc.local/settings"), true);
+assert.strictEqual(Library.isAppUrl("https://usc.local/search?q=hi"), false);
+assert.strictEqual(Library.isSurfaceUrl("https://usc.local/"), true);
+assert.strictEqual(Library.isSurfaceUrl("https://en.wikipedia.org/"), false);
+assert.deepStrictEqual(Library.parseSetUrl("https://usc.local/set?k=theme&v=dark"), {
+  key: "theme",
+  value: "dark"
+});
+assert.strictEqual(Library.setUrl("proxy", "auto"), "https://usc.local/set?k=proxy&v=auto");
+
+assert.strictEqual(
+  Library.shouldRemember({ url: "https://usc.local/", title: "USC" }),
+  false
+);
+assert.strictEqual(
+  Library.shouldRemember({ url: "https://usc.local/settings", title: "settings" }),
+  false
+);
+assert.strictEqual(
+  Library.shouldRemember({ url: "https://usc.local/search?q=hi", title: "hi" }),
+  true
+);
+assert.strictEqual(
+  Library.shouldRemember({ url: "https://en.wikipedia.org/wiki/X", title: "X" }),
+  true
+);
+assert.strictEqual(
+  Library.shouldRemember({ url: "https://ex.com/a.png", title: "image", via: "image-link" }),
+  false
+);
+
+var remembered = Library.remember({ recents: [], last: null }, {
+  title: "Hello",
+  url: "https://en.wikipedia.org/wiki/Hello"
+});
+assert.strictEqual(remembered.last.kind, "page");
+assert.strictEqual(remembered.recents.length, 1);
+remembered = Library.remember(remembered, {
+  title: "quantum",
+  url: "https://usc.local/search?q=quantum"
+});
+assert.strictEqual(remembered.last.kind, "search");
+assert.strictEqual(remembered.last.title, "search · quantum");
+assert.strictEqual(remembered.recents.length, 2);
+assert.strictEqual(remembered.recents[0].url, "https://usc.local/search?q=quantum");
+
+var homeMd = Library.homeMarkdown({
+  recents: remembered.recents,
+  last: remembered.last,
+  bookmarks: [{ title: "Saved", url: "https://example.com/saved" }]
+});
+assert.ok(homeMd.indexOf("continue") >= 0);
+assert.ok(homeMd.indexOf("usc.local/search?q=quantum") >= 0);
+assert.ok(homeMd.indexOf("recent") >= 0);
+assert.ok(homeMd.indexOf("en.wikipedia.org/wiki/Hello") >= 0);
+assert.ok(homeMd.indexOf("bookmarks") >= 0);
+assert.ok(homeMd.indexOf("example.com/saved") >= 0);
+assert.ok(homeMd.indexOf("usc.local/settings") >= 0);
+assert.ok(homeMd.indexOf("usc.local/history") >= 0);
+assert.ok(homeMd.indexOf("usc.local/help") >= 0);
+
+var emptyHome = Library.homeMarkdown({});
+assert.ok(emptyHome.indexOf("type to search") >= 0);
+assert.ok(emptyHome.indexOf("continue") < 0);
+
+var homeDoc = Browser.markdownToDocument(homeMd, Library.HOME);
+assert.ok(homeDoc.links.some(function (link) {
+  return link.url === "https://en.wikipedia.org/wiki/Hello";
+}));
+assert.ok(homeDoc.links.some(function (link) {
+  return link.url === "https://usc.local/settings";
+}));
+
+var settingsDoc = Browser.markdownToDocument(
+  Library.settingsMarkdown({ theme: "dark", proxy: "auto", images: "off", font: 15 }),
+  Library.SETTINGS
+);
+assert.ok(settingsDoc.links.some(function (link) {
+  return link.url.indexOf("k=theme") >= 0 && link.url.indexOf("v=light") >= 0;
+}));
+assert.ok(settingsDoc.links.some(function (link) {
+  return link.url.indexOf("k=recents") >= 0;
+}));
+
+var historyDoc = Browser.markdownToDocument(
+  Library.historyMarkdown([
+    { title: "history", url: Library.HISTORY, current: true },
+    { title: "Hello", url: "https://en.wikipedia.org/wiki/Hello", current: false },
+    { title: "USC", url: Library.HOME }
+  ]),
+  Library.HISTORY
+);
+assert.strictEqual(historyDoc.links.filter(function (link) {
+  return link.url.indexOf("wikipedia") >= 0;
+}).length, 1);
+assert.ok(historyDoc.links.some(function (link) {
+  return link.url === Library.HOME;
+}));
+
+var emptyMarks = Browser.markdownToDocument(Library.bookmarksMarkdown([]), Library.BOOKMARKS);
+assert.ok(Browser.pageToPlainText(emptyMarks).indexOf("star a page") >= 0);
+
+assert.strictEqual(Library.readingMinutes("abcd"), 0);
+assert.ok(Library.readingMinutes("x".repeat(1600)) >= 2);
+assert.strictEqual(Library.isSectionLabel("continue"), true);
+assert.strictEqual(Library.isSectionLabel("theme  auto"), true);
+assert.strictEqual(Library.isSectionLabel("Hello world"), false);
+
+var cleared = Library.clearSession();
+assert.deepStrictEqual(cleared, { recents: [], last: null });
 
 var originalFetch = global.fetch;
 

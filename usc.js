@@ -1,11 +1,13 @@
 (function (root, factory) {
   var Browser = root.USCBrowser;
+  var Library = root.USCLibrary;
   if (!Browser && typeof require === "function") Browser = require("./browser.js");
-  var api = factory(Browser);
+  if (!Library && typeof require === "function") Library = require("./library.js");
+  var api = factory(Browser, Library);
   root.USC = api;
   if (typeof module === "object" && module.exports) module.exports = api;
   if (typeof document !== "undefined") api.mount(document);
-})(typeof globalThis !== "undefined" ? globalThis : this, function (Browser) {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (Browser, Library) {
   var ALL = ["google", "bing", "baidu"];
   var SUGGEST_LIMIT = 8;
   var JSONP_TIMEOUT = 5000;
@@ -20,6 +22,7 @@
   var PROXY_KEY = "usc.proxy";
   var THEME_KEY = "usc.theme";
   var FONT_KEY = "usc.font";
+  var SESSION_KEY = "usc.session";
   var COMMANDS = [
     ":back",
     ":forward",
@@ -47,6 +50,12 @@
     ":proxy auto",
     ":proxy on",
     ":proxy off",
+    ":settings",
+    ":resume",
+    ":history",
+    ":bookmarks",
+    ":about",
+    ":star",
     ":help"
   ];
 
@@ -148,6 +157,10 @@
     "i on     always load images\n" +
     "proxy     auto / on / off\n" +
     "theme     tap / Alt+T · dark light auto\n" +
+    "settings  appearance · proxy · font\n" +
+    "resume    reopen last page\n" +
+    "star      bookmark / unbookmark\n" +
+    "history   this session\n" +
     "font +    adjust text size\n" +
     "copy      copy current URL\n" +
     "share     share current page\n" +
@@ -165,6 +178,10 @@
     "\n" +
     "theme    dark / light / auto\n" +
     "         tap the label · Alt+T · theme\n" +
+    "settings  theme · proxy · images · font\n" +
+    "resume    last page after refresh\n" +
+    "star      save this page\n" +
+    "history   this session\n" +
     "proxy    auto (Jina when blocked)\n" +
     "images   links until you load them\n" +
     "\n" +
@@ -219,6 +236,10 @@
     if (lower === "proxy") return { type: "proxy", mode: "show" };
     if (lower === "theme") return { type: "theme", mode: "cycle" };
     if (lower === "about") return { type: "about" };
+    if (lower === "settings" || lower === "prefs") return { type: "settings" };
+    if (lower === "resume" || lower === "continue") return { type: "resume" };
+    if (lower === "star") return { type: "bookmark", index: 0 };
+    if (lower === "recents" || lower === "recent") return { type: "home" };
     if (lower === "font") return { type: "font", value: "show" };
     if (lower === "copy") return { type: "copy", index: 0 };
     if (lower === "share") return { type: "share" };
@@ -782,7 +803,7 @@
   function isInternalSearchUrl(url) {
     try {
       var u = new URL(url);
-      return u.hostname === "usc.local" && (u.pathname === "/search" || u.pathname === "/");
+      return u.hostname === "usc.local" && u.pathname === "/search";
     } catch (e) {
       return false;
     }
@@ -831,10 +852,23 @@
     storageSet(BOOKMARK_KEY, JSON.stringify(list));
   }
 
-  function homeDocument() {
-    return Browser.markdownToDocument(
-      "Title: USC\nURL Source: https://usc.local/\n\nMarkdown Content:\nUSC\n",
-      "https://usc.local/"
+  function readSession() {
+    try {
+      var data = JSON.parse(storageGet(SESSION_KEY, "{}"));
+      var recents = data && Array.isArray(data.recents) ? data.recents : [];
+      return { recents: recents, last: data && data.last ? data.last : null };
+    } catch (e) {
+      return { recents: [], last: null };
+    }
+  }
+
+  function writeSession(state) {
+    storageSet(
+      SESSION_KEY,
+      JSON.stringify({
+        recents: (state && state.recents) || [],
+        last: (state && state.last) || null
+      })
     );
   }
 
@@ -877,6 +911,157 @@
     var historySeq = 0;
     var nativeHistory =
       typeof window !== "undefined" && window.history && window.history.pushState;
+    var session = readSession();
+
+    function homeDocument() {
+      return Browser.markdownToDocument(
+        Library.homeMarkdown({
+          recents: session.recents,
+          last: session.last,
+          bookmarks: readBookmarks()
+        }),
+        Library.HOME
+      );
+    }
+
+    function settingsDocument() {
+      return Browser.markdownToDocument(
+        Library.settingsMarkdown({
+          theme: themeMode,
+          proxy: proxyMode,
+          images: imagesMode,
+          font: fontSize
+        }),
+        Library.SETTINGS
+      );
+    }
+
+    function historyDocument() {
+      var items = [];
+      for (var i = stack.length - 1; i >= 0; i--) {
+        if (!stack[i]) continue;
+        items.push({
+          title: stack[i].title,
+          url: stack[i].url,
+          current: i === stackPos
+        });
+      }
+      return Browser.markdownToDocument(Library.historyMarkdown(items), Library.HISTORY);
+    }
+
+    function bookmarksDocument() {
+      return Browser.markdownToDocument(Library.bookmarksMarkdown(readBookmarks()), Library.BOOKMARKS);
+    }
+
+    function helpDocument() {
+      return Browser.markdownToDocument(
+        Library.textMarkdown(
+          "help",
+          Library.HELP,
+          "help\n\n" + HELP + "\n[settings](" + Library.mdHref(Library.SETTINGS) + ")\n[home](" + Library.mdHref(Library.HOME) + ")\n"
+        ),
+        Library.HELP
+      );
+    }
+
+    function aboutDocument() {
+      return Browser.markdownToDocument(
+        Library.textMarkdown(
+          "about",
+          Library.ABOUT,
+          ABOUT + "\n[settings](" + Library.mdHref(Library.SETTINGS) + ")\n[help](" + Library.mdHref(Library.HELP) + ")\n[home](" + Library.mdHref(Library.HOME) + ")\n"
+        ),
+        Library.ABOUT
+      );
+    }
+
+    function rememberCurrent(doc) {
+      if (!doc) return;
+      session = Library.remember(session, {
+        title: doc.title,
+        url: doc.url,
+        via: doc.via
+      });
+      writeSession(session);
+    }
+
+    function resumeLast() {
+      if (session.last && session.last.url) {
+        go(session.last.url, "push");
+        return true;
+      }
+      printMsg("nothing to resume", "err");
+      return false;
+    }
+
+    function applyLocalUrl(abs, nav) {
+      if (Library.isHomeUrl(abs) || abs === "https://usc.local") {
+        cancelPending();
+        setCurrent(homeDocument(), nav || "push");
+        return true;
+      }
+      if (Library.isSettingsUrl(abs)) {
+        cancelPending();
+        setCurrent(settingsDocument(), nav || "push");
+        return true;
+      }
+      if (Library.isHistoryUrl(abs)) {
+        cancelPending();
+        setCurrent(historyDocument(), nav || "push");
+        return true;
+      }
+      if (Library.isBookmarksUrl(abs)) {
+        cancelPending();
+        setCurrent(bookmarksDocument(), nav || "push");
+        return true;
+      }
+      if (Library.isHelpUrl(abs)) {
+        cancelPending();
+        setCurrent(helpDocument(), nav || "push");
+        return true;
+      }
+      if (Library.isAboutUrl(abs)) {
+        cancelPending();
+        setCurrent(aboutDocument(), nav || "push");
+        return true;
+      }
+      if (Library.isResumeUrl(abs)) {
+        return resumeLast();
+      }
+      if (Library.isSetUrl(abs)) {
+        var change = Library.parseSetUrl(abs);
+        if (!change) return true;
+        if (change.key === "theme") {
+          var themeVal = change.value === "auto" ? "system" : change.value;
+          setTheme(themeVal, true);
+        } else if (change.key === "proxy" && (change.value === "on" || change.value === "off" || change.value === "auto")) {
+          proxyMode = change.value;
+          storageSet(PROXY_KEY, proxyMode);
+        } else if (change.key === "images" && (change.value === "on" || change.value === "off")) {
+          imagesMode = change.value;
+          storageSet(IMAGE_KEY, imagesMode);
+        } else if (change.key === "font") {
+          if (change.value === "+") fontSize += 1;
+          else if (change.value === "-") fontSize -= 1;
+          else if (change.value === "reset") fontSize = 15;
+          fontSize = Math.max(12, Math.min(20, fontSize));
+          storageSet(FONT_KEY, String(fontSize));
+          applyAppearance();
+        } else if (change.key === "recents" && change.value === "clear") {
+          session = Library.clearSession();
+          writeSession(session);
+        }
+        cancelPending();
+        setCurrent(settingsDocument(), "replace");
+        printMsg(
+          change.key === "recents"
+            ? "recents cleared"
+            : change.key + " " + (change.key === "theme" ? themeLabel(themeMode) : change.value)
+        );
+        return true;
+      }
+      return false;
+    }
 
     function setStatus(text) {
       status.textContent = text;
@@ -1013,8 +1198,19 @@
     }
 
     function paintStatus() {
-      if (!current || current.url === "https://usc.local/") {
-        setStatus("");
+      if (!current || Library.isHomeUrl(current.url)) {
+        setStatus(
+          "theme " + themeLabel(themeMode) + "    proxy " + proxyMode + (session.last ? "    resume" : "")
+        );
+        return;
+      }
+      if (Library.isSurfaceUrl(current.url)) {
+        var surface = "settings";
+        if (Library.isHistoryUrl(current.url)) surface = "history";
+        else if (Library.isBookmarksUrl(current.url)) surface = "bookmarks";
+        else if (Library.isHelpUrl(current.url)) surface = "help";
+        else if (Library.isAboutUrl(current.url)) surface = "about";
+        setStatus(surface);
         return;
       }
       var host = current.url;
@@ -1025,9 +1221,12 @@
       var bits = [current.title || host];
       if (current.title && current.title !== host) bits.push(host);
       if (current.links && current.links.length) bits.push(String(current.links.length));
+      var mins = Library.readingMinutes(Browser.pageToPlainText(current));
+      if (mins) bits.push(mins + " min");
       if (view !== "page") bits.push(view);
       if (imagesMode === "on") bits.push("img");
       if (current.via && current.via.indexOf("jina-") === 0) bits.push("via jina");
+      else if (current.via && current.via.indexOf("search:") === 0) bits.push(current.via.slice(7));
       if (current.truncated) bits.push("cut");
       setStatus(bits.join("    "));
     }
@@ -1069,12 +1268,27 @@
         loaded[documentModel.images[i].n] = documentModel.images[i].loaded;
       }
       var tokens = documentModel.tokens || [];
+      var homeSurface = Library.isHomeUrl(documentModel.url);
+      var sawMark = false;
       for (var t = 0; t < tokens.length; t++) {
         var tok = tokens[t];
         if (tok.t === "nl") {
           page.appendChild(doc.createTextNode("\n"));
         } else if (tok.t === "text") {
-          appendFindText(page, tok.v);
+          if (homeSurface && !sawMark && String(tok.v || "").replace(/^\s+/, "")) {
+            var mark = doc.createElement("span");
+            mark.className = "mark";
+            mark.textContent = tok.v;
+            page.appendChild(mark);
+            sawMark = true;
+          } else if (Library.isSurfaceUrl(documentModel.url) && Library.isSectionLabel(tok.v)) {
+            var sec = doc.createElement("span");
+            sec.className = "sec";
+            sec.textContent = tok.v;
+            page.appendChild(sec);
+          } else {
+            appendFindText(page, tok.v);
+          }
         } else if (tok.t === "link") {
           var a = doc.createElement("a");
           a.className = "ln";
@@ -1126,38 +1340,16 @@
       page.scrollTop = 0;
     }
 
-    function paintHome() {
-      page.textContent = "";
-      var wrap = doc.createElement("div");
-      var mark = doc.createElement("div");
-      mark.className = "mark";
-      mark.textContent = "USC";
-      var hintLine = doc.createElement("div");
-      hintLine.className = "hint";
-      hintLine.textContent = "search or url";
-      var extra = doc.createElement("div");
-      extra.className = "hint";
-      extra.textContent = "theme  " + themeLabel(themeMode) + "  ·  help";
-      wrap.appendChild(mark);
-      wrap.appendChild(hintLine);
-      wrap.appendChild(extra);
-      page.appendChild(wrap);
-    }
-
     function paint() {
       findMatches = 0;
-      var home = current && current.url === "https://usc.local/" && view === "page";
+      var home = current && Library.isHomeUrl(current.url) && view === "page";
+      var libraryPage = current && Library.isSurfaceUrl(current.url) && !home && view === "page";
       var searchPage =
         current && current.url && String(current.url).indexOf("usc.local/search") >= 0 && view === "page";
       if (doc.body && doc.body.classList) {
         doc.body.classList.toggle("home", !!home);
+        doc.body.classList.toggle("library", !!libraryPage);
         doc.body.classList.toggle("search-results", !!searchPage);
-      }
-      if (home) {
-        paintHome();
-        paintStatus();
-        updateProgress();
-        return;
       }
       if (view === "help") {
         paintTextView(HELP);
@@ -1242,6 +1434,7 @@
         }
       }
       if (documentModel.title) doc.title = documentModel.title + " · USC";
+      if (nav !== "initial") rememberCurrent(documentModel);
       paint();
     }
 
@@ -1252,6 +1445,7 @@
       } else {
         abs = Browser.normalizeUrl(rawUrl, current && current.url);
       }
+      if (applyLocalUrl(abs, nav || "push")) return;
       if (isInternalSearchUrl(abs)) {
         var internalQuery = internalSearchQuery(abs);
         if (internalQuery) {
@@ -1597,14 +1791,21 @@
     function handle(cmd, line) {
       if (cmd.type === "help") {
         cancelPending();
-        view = "help";
-        paint();
+        setCurrent(helpDocument(), "push");
         return;
       }
       if (cmd.type === "about") {
         cancelPending();
-        view = "about";
-        paint();
+        setCurrent(aboutDocument(), "push");
+        return;
+      }
+      if (cmd.type === "settings") {
+        cancelPending();
+        setCurrent(settingsDocument(), "push");
+        return;
+      }
+      if (cmd.type === "resume") {
+        resumeLast();
         return;
       }
       if (cmd.type === "clear") {
@@ -1661,7 +1862,7 @@
         return;
       }
       if (cmd.type === "reload") {
-        if (!current || !current.url || current.url.indexOf("usc.local") >= 0) {
+        if (!current || !current.url || Library.isAppUrl(current.url)) {
           paint();
           return;
         }
@@ -1798,10 +1999,8 @@
         return;
       }
       if (cmd.type === "history") {
-        if (!stack.length) printMsg("(empty)");
-        for (var h = 0; h < stack.length; h++) {
-          printMsg((h === stackPos ? "* " : "  ") + stack[h].title + "  " + stack[h].url);
-        }
+        cancelPending();
+        setCurrent(historyDocument(), "push");
         return;
       }
       if (cmd.type === "save") {
@@ -1843,21 +2042,23 @@
         }
         for (var markIndex = 0; markIndex < marks.length; markIndex++) {
           if (marks[markIndex].url === current.url) {
-            printMsg("already bookmarked");
+            var dropped = marks.splice(markIndex, 1)[0];
+            writeBookmarks(marks);
+            printMsg("unstarred " + dropped.title);
+            if (Library.isBookmarksUrl(current.url) || Library.isHomeUrl(current.url)) {
+              setCurrent(Library.isHomeUrl(current.url) ? homeDocument() : bookmarksDocument(), "replace");
+            }
             return;
           }
         }
         marks.push({ title: current.title, url: current.url });
         writeBookmarks(marks);
-        printMsg("bookmarked " + current.title);
+        printMsg("starred " + current.title);
         return;
       }
       if (cmd.type === "bookmarks") {
-        var list = readBookmarks();
-        if (!list.length) printMsg("(no bookmarks)");
-        for (var b = 0; b < list.length; b++) {
-          printMsg("[" + (b + 1) + "] " + list[b].title + "  " + list[b].url);
-        }
+        cancelPending();
+        setCurrent(bookmarksDocument(), "push");
         return;
       }
       if (cmd.type === "unbookmark") {
@@ -1869,6 +2070,9 @@
         var removed = bm.splice(cmd.index - 1, 1)[0];
         writeBookmarks(bm);
         printMsg("removed " + removed.title);
+        if (current && (Library.isBookmarksUrl(current.url) || Library.isHomeUrl(current.url))) {
+          setCurrent(Library.isHomeUrl(current.url) ? homeDocument() : bookmarksDocument(), "replace");
+        }
         return;
       }
       if (cmd.type === "search") {
@@ -2100,11 +2304,6 @@
         handle({ type: "theme", mode: "cycle" }, "theme");
         return;
       }
-      if (event.altKey && (event.key === "t" || event.key === "T")) {
-        event.preventDefault();
-        handle({ type: "theme", mode: "cycle" }, "theme");
-        return;
-      }
       if (
         event.key === "/" &&
         event.target !== input &&
@@ -2163,6 +2362,7 @@
     isInternalSearchUrl: isInternalSearchUrl,
     internalSearchQuery: internalSearchQuery,
     internalSearchUrl: internalSearchUrl,
+    Library: Library,
     mount: mount,
     Browser: Browser
   };
