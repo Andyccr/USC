@@ -350,6 +350,63 @@
     }
   }
 
+  function readMdUrl(line, openIdx) {
+    // openIdx points at '(' of ](url) or ](<url>)
+    var i = openIdx + 1;
+    while (i < line.length && /\s/.test(line.charAt(i))) i += 1;
+    if (line.charAt(i) === "<") {
+      var close = line.indexOf(">", i + 1);
+      if (close < 0) return null;
+      var end = close + 1;
+      while (end < line.length && line.charAt(end) !== ")") end += 1;
+      if (line.charAt(end) !== ")") return null;
+      return { url: line.slice(i + 1, close), end: end + 1 };
+    }
+    var depth = 0;
+    var start = i;
+    for (; i < line.length; i++) {
+      var ch = line.charAt(i);
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        if (!depth) return { url: line.slice(start, i), end: i + 1 };
+        depth -= 1;
+      } else if (/\s/.test(ch) && !depth) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function firstMarkdownLink(line) {
+    var s = String(line || "");
+    var i = 0;
+    while (i < s.length) {
+      if (s.charAt(i) === "!" && s.charAt(i + 1) === "[") {
+        var altEnd = s.indexOf("]", i + 2);
+        if (altEnd >= 0 && s.charAt(altEnd + 1) === "(") {
+          var img = readMdUrl(s, altEnd + 1);
+          i = img ? img.end : i + 2;
+          continue;
+        }
+      }
+      if (s.charAt(i) === "[") {
+        var labelEnd = s.indexOf("]", i + 1);
+        if (labelEnd >= 0 && s.charAt(labelEnd + 1) === "(") {
+          var dest = readMdUrl(s, labelEnd + 1);
+          if (dest) {
+            return {
+              text: s.slice(i + 1, labelEnd),
+              url: dest.url.replace(/^\s*<\s*|\s*>\s*$/g, ""),
+              end: dest.end
+            };
+          }
+        }
+      }
+      i += 1;
+    }
+    return null;
+  }
+
   function markdownToDocument(text, baseUrl) {
     var raw = String(text || "").replace(/\r\n/g, "\n");
     var title = "";
@@ -377,34 +434,6 @@
         links.push({ n: n, text: text, url: url });
       }
       tokens.push({ t: "link", n: n, v: text, url: url });
-    }
-
-    function readMdUrl(line, openIdx) {
-      // openIdx points at '(' of ](url) or ](<url>)
-      var i = openIdx + 1;
-      while (i < line.length && /\s/.test(line.charAt(i))) i += 1;
-      if (line.charAt(i) === "<") {
-        var close = line.indexOf(">", i + 1);
-        if (close < 0) return null;
-        var end = close + 1;
-        while (end < line.length && line.charAt(end) !== ")") end += 1;
-        if (line.charAt(end) !== ")") return null;
-        return { url: line.slice(i + 1, close), end: end + 1 };
-      }
-      var depth = 0;
-      var start = i;
-      for (; i < line.length; i++) {
-        var ch = line.charAt(i);
-        if (ch === "(") depth += 1;
-        else if (ch === ")") {
-          if (!depth) return { url: line.slice(start, i), end: i + 1 };
-          depth -= 1;
-        } else if (/\s/.test(ch) && !depth) {
-          // whitespace ends unbracketed markdown destinations
-          return null;
-        }
-      }
-      return null;
     }
 
     function consumeInline(line) {
@@ -779,6 +808,7 @@
     decodeEntities: decodeEntities,
     htmlToDocument: htmlToDocument,
     markdownToDocument: markdownToDocument,
+    firstMarkdownLink: firstMarkdownLink,
     parseFetched: parseFetched,
     pageToPlainText: pageToPlainText,
     outlineText: outlineText,
