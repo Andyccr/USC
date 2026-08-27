@@ -43,6 +43,14 @@
     }
   }
 
+  function isLocalHost(url) {
+    try {
+      return new URL(url).hostname === "usc.local";
+    } catch (e) {
+      return false;
+    }
+  }
+
   function isHomeUrl(url) {
     return localPath(url) === "/";
   }
@@ -109,7 +117,7 @@
 
   function shouldRemember(entry) {
     if (!entry || !entry.url) return false;
-    if (entry.via === "error" || entry.via === "image-link") return false;
+    if (entry.via === "error" || entry.via === "image-link" || entry.via === "loading") return false;
     try {
       var u = new URL(entry.url);
       if (u.hostname === "usc.local") return u.pathname === "/search";
@@ -158,6 +166,7 @@
     if (/^(continue|recent|bookmarks|session|this session)$/.test(t)) return true;
     if (/^(theme|proxy|images|font)\b/.test(t)) return true;
     if (/^nothing here/.test(t) || /^star a page/.test(t) || /^no bookmarks/.test(t)) return true;
+    if (/^loading/.test(t) || /^fetch failed/.test(t) || /^real  open/.test(t)) return true;
     return false;
   }
 
@@ -317,6 +326,39 @@
     return md;
   }
 
+  function loadingMarkdown(url, title) {
+    var label = safeLabel(title) || hostOf(url) || String(url || "");
+    return (
+      "Title: " +
+      label +
+      "\nURL Source: " +
+      url +
+      "\n\nMarkdown Content:\n" +
+      label +
+      "\n\nloading…\n"
+    );
+  }
+
+  function errorMarkdown(url, message) {
+    var host = hostOf(url) || String(url || "");
+    var detail = safeLabel(message) || "error";
+    return (
+      "Title: " +
+      host +
+      "\nURL Source: " +
+      url +
+      "\n\nMarkdown Content:\n" +
+      host +
+      "\n\nfetch failed: " +
+      detail +
+      "\n\n" +
+      String(url || "") +
+      "\n\nreal  open outside\n\n[home](" +
+      mdHref(HOME) +
+      ")\n"
+    );
+  }
+
   function textMarkdown(title, url, body) {
     return (
       "Title: " +
@@ -341,6 +383,7 @@
     mdHref: mdHref,
     hostOf: hostOf,
     isHomeUrl: isHomeUrl,
+    isLocalHost: isLocalHost,
     isSettingsUrl: isSettingsUrl,
     isResumeUrl: isResumeUrl,
     isSetUrl: isSetUrl,
@@ -361,6 +404,8 @@
     settingsMarkdown: settingsMarkdown,
     historyMarkdown: historyMarkdown,
     bookmarksMarkdown: bookmarksMarkdown,
-    textMarkdown: textMarkdown
+    textMarkdown: textMarkdown,
+    loadingMarkdown: loadingMarkdown,
+    errorMarkdown: errorMarkdown
   };
 });

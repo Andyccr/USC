@@ -89,7 +89,7 @@ usc.js         命令解析、搜索流水线、历史栈、主题、渲染与�
 usc.test.js    无依赖单元测试
 ```
 
-产品页（首页、设置、历史、书签、帮助、关于）都是 **usc.local 上的 markdown 文档**，走同一套 `go` / 点击 / `paint`，而不是另一套 UI。
+产品页（首页、设置、历史、书签、帮助、关于）都是 **usc.local 上的 markdown 文档**，走同一套 `go` / 点击 / `paint`，而不是另一套 UI。`usc.local` **从不发起网络请求**。打开远程页时立刻换成 loading 文档，成功或失败再替换为正文 / 错误页（点击后不会停在搜索列表上）。
 
 #### 总览
 
@@ -158,6 +158,7 @@ sequenceDiagram
   USC->>USC: extractSearchResults<br/>去图标/缩略图/噪声<br/>unwrap 跳转 → 真实 URL
   USC->>USC: 渐进渲染 [1][2]… 结果列表
   U->>USC: 点击 [1] 或输入 1
+  USC-->>U: 立刻 loading… 页（离开搜索列表）
   USC->>BR: fetchPage(真实 URL, markdown 优先)
   BR->>J: 二级页面
   J-->>BR: 正文 Markdown/HTML
@@ -289,7 +290,7 @@ usc.js         Commands, search pipeline, history stack, theme, paint
 usc.test.js    Dependency-free tests
 ```
 
-Product surfaces (home, settings, history, bookmarks, help, about) are **markdown documents on usc.local**, so they use the same `go` / click / `paint` path as articles.
+Product surfaces (home, settings, history, bookmarks, help, about) are **markdown documents on usc.local**, so they use the same `go` / click / `paint` path as articles. Host `usc.local` is **never fetched from the network**. Opening a remote page immediately replaces the current document with a loading page, then with article text or an error — clicks do not leave you staring at the search list.
 
 #### Overview
 
@@ -351,6 +352,7 @@ sequenceDiagram
   USC->>USC: extract results (drop thumbs/icons)<br/>unwrap redirects
   USC-->>U: [1][2] text list
   U->>USC: open [1]
+  USC-->>U: loading… page (leaves the result list immediately)
   USC->>BR: article URL, markdown preferred
   BR->>J: secondary page
   J-->>USC: article text

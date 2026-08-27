@@ -225,6 +225,13 @@ var extracted = USC.extractSearchResults(bingSample, "bing");
 assert.strictEqual(extracted.length, 1, "icon/thumbnail links must not become results");
 assert.strictEqual(extracted[0].title, "Hello - Wikipedia");
 assert.strictEqual(extracted[0].url, "https://en.wikipedia.org/wiki/Hello");
+assert.strictEqual(
+  USC.extractSearchResults(
+    "Title: t\nURL Source: https://www.bing.com/search?q=x\n\nMarkdown Content:\n## [Hello (Adele song) - Wikipedia](https://en.wikipedia.org/wiki/Hello_(Adele_song))\nA piano ballad.\n",
+    "bing"
+  )[0].url,
+  "https://en.wikipedia.org/wiki/Hello_(Adele_song)"
+);
 assert.ok(extracted[0].snippet.indexOf("greeting") >= 0);
 assert.strictEqual(USC.isImageUrl("https://th.bing.com/th/id/ODLS.ABC"), true);
 assert.strictEqual(USC.isImageUrl("https://en.wikipedia.org/wiki/Hello"), false);
@@ -242,6 +249,16 @@ assert.strictEqual(built.url.indexOf("usc.local/search") >= 0, true);
 assert.ok(built.links.some(function (link) {
   return link.url === "https://en.wikipedia.org/wiki/Hello";
 }));
+assert.ok(
+  USC.mergeSearchResults([
+    {
+      results: [
+        { title: "Video", url: "https://www.youtube.com/watch?v=1", snippet: "" },
+        { title: "Hello", url: "https://en.wikipedia.org/wiki/Hello", snippet: "" }
+      ]
+    }
+  ])[0].url.indexOf("wikipedia") >= 0
+);
 assert.ok(built.links.some(function (link) {
   return link.url.indexOf("usc.local/search") >= 0;
 }));
@@ -281,7 +298,15 @@ assert.deepStrictEqual(USC.parseLine("history"), { type: "history" });
 assert.deepStrictEqual(USC.parseLine("bookmarks"), { type: "bookmarks" });
 
 var Library = require("./library.js");
-assert.strictEqual(Library.isHomeUrl("https://usc.local/"), true);
+assert.strictEqual(Library.isLocalHost("https://usc.local/settings"), true);
+assert.strictEqual(Library.isLocalHost("https://en.wikipedia.org/wiki/Hello"), false);
+assert.strictEqual(
+  Library.shouldRemember({ url: "https://en.wikipedia.org/wiki/X", title: "X", via: "loading" }),
+  false
+);
+assert.ok(Library.loadingMarkdown("https://ex.com/", "Hello").indexOf("loading") >= 0);
+assert.ok(Library.errorMarkdown("https://ex.com/", "timeout").indexOf("fetch failed") >= 0);
+assert.ok(Library.errorMarkdown("https://ex.com/", "timeout").indexOf("usc.local") >= 0);
 assert.strictEqual(Library.isHomeUrl("https://usc.local"), true);
 assert.strictEqual(Library.isHomeUrl("https://en.wikipedia.org/wiki/Hello"), false);
 assert.strictEqual(Library.isSettingsUrl("https://usc.local/settings"), true);
