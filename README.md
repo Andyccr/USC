@@ -202,6 +202,7 @@ Fetched text
      paint():
        link  → [n] 标题     （data-url，点击站内打开）
        img   → [img:n alt] （文本链接；点击或 i n 才加载 <img>）
+     markdown 会去掉脚注、表格线、*强调*，并识别 [text](url "title")
 ```
 
 #### 模块边界
@@ -365,6 +366,7 @@ sequenceDiagram
 tokens: text | nl | link | img(loaded flag)
 paint:  [n] title     → in-app navigation
         [img:n alt]   → text link until user loads it
+markdown: links with "titles", skip footnotes, flatten tables, strip *emphasis*
 ```
 
 ```bash
