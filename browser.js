@@ -351,14 +351,21 @@
   }
 
   function readMdUrl(line, openIdx) {
-    // openIdx points at '(' of ](url) or ](<url>)
+    // openIdx points at '(' of ](url), ](<url>), or ](url "title")
     var i = openIdx + 1;
     while (i < line.length && /\s/.test(line.charAt(i))) i += 1;
     if (line.charAt(i) === "<") {
       var close = line.indexOf(">", i + 1);
       if (close < 0) return null;
       var end = close + 1;
-      while (end < line.length && line.charAt(end) !== ")") end += 1;
+      while (end < line.length && /\s/.test(line.charAt(end))) end += 1;
+      if (line.charAt(end) === '"' || line.charAt(end) === "'") {
+        var q = line.charAt(end);
+        var closeQ = line.indexOf(q, end + 1);
+        if (closeQ < 0) return null;
+        end = closeQ + 1;
+        while (end < line.length && /\s/.test(line.charAt(end))) end += 1;
+      }
       if (line.charAt(end) !== ")") return null;
       return { url: line.slice(i + 1, close), end: end + 1 };
     }
@@ -371,10 +378,38 @@
         if (!depth) return { url: line.slice(start, i), end: i + 1 };
         depth -= 1;
       } else if (/\s/.test(ch) && !depth) {
-        return null;
+        var url = line.slice(start, i);
+        var j = i;
+        while (j < line.length && /\s/.test(line.charAt(j))) j += 1;
+        var quote = line.charAt(j);
+        if (quote === '"' || quote === "'") {
+          var endQuote = line.indexOf(quote, j + 1);
+          if (endQuote < 0) return null;
+          j = endQuote + 1;
+          while (j < line.length && /\s/.test(line.charAt(j))) j += 1;
+        }
+        if (line.charAt(j) !== ")") return null;
+        return { url: url, end: j + 1 };
       }
     }
     return null;
+  }
+
+  function findLabelEnd(line, openIdx) {
+    var depth = 1;
+    for (var i = openIdx + 1; i < line.length; i++) {
+      var ch = line.charAt(i);
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === "[") depth += 1;
+      else if (ch === "]") {
+        depth -= 1;
+        if (!depth) return i;
+      }
+    }
+    return -1;
   }
 
   function firstMarkdownLink(line) {
@@ -390,7 +425,7 @@
         }
       }
       if (s.charAt(i) === "[") {
-        var labelEnd = s.indexOf("]", i + 1);
+        var labelEnd = findLabelEnd(s, i);
         if (labelEnd >= 0 && s.charAt(labelEnd + 1) === "(") {
           var dest = readMdUrl(s, labelEnd + 1);
           if (dest) {
@@ -405,6 +440,59 @@
       i += 1;
     }
     return null;
+  }
+
+  function cleanInlineMarkdown(s) {
+    var out = String(s || "");
+    out = out.replace(/\\([\\`*_{}\[\]()#+\-.!])/g, "$1");
+    var n;
+    for (n = 0; n < 3; n++) {
+      var next = out
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/__([^_\s]+)__/g, "$1")
+        .replace(/\*([^*\s]+)\*/g, "$1")
+        .replace(/_([^_\s]+)_/g, "$1");
+      if (next === out) break;
+      out = next;
+    }
+    return out.replace(/`([^`]+)`/g, "$1");
+  }
+
+  function isCitationLink(text, url) {
+    var label = String(text || "")
+      .replace(/[\[\]]/g, "")
+      .replace(/\s+/g, "")
+      .trim();
+    if (/^\d+$/.test(label)) return true;
+    if (/citation.needed/i.test(String(text || "")) || /Citation_needed/i.test(String(url || ""))) return true;
+    return /#cite_(note|ref)|#endnote|#fn\b/i.test(String(url || ""));
+  }
+
+  function isNoiseImage(alt, url) {
+    var a = String(alt || "").toLowerCase();
+    var u = String(url || "").toLowerCase();
+    if (/semi-protected|protection policy|edit this|listen\b|disambiguation/.test(a)) return true;
+    if (/\/(?:16|20|24)px-/.test(u)) return true;
+    return false;
+  }
+
+  function preprocessMdLine(line) {
+    var s = String(line || "").replace(/^\s+/, "");
+    if (!s) return "";
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(s)) return "";
+    if (/^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(s)) return "";
+    if (s.charAt(0) === "|" && s.indexOf("|", 1) > 0) {
+      s = s
+        .replace(/^\||\|$/g, "")
+        .split("|")
+        .map(function (cell) {
+          return cell.replace(/^\s+|\s+$/g, "");
+        })
+        .filter(Boolean)
+        .join("  ·  ");
+    }
+    if (/^>\s?/.test(s)) s = s.replace(/^>\s?/, "");
+    return s;
   }
 
   function markdownToDocument(text, baseUrl) {
@@ -423,9 +511,13 @@
     var linkMap = {};
 
     function addLink(label, url) {
-      url = resolveUrl(String(url || "").replace(/^\s*<\s*|\s*>\s*$/g, ""), source);
+      url = String(url || "")
+        .replace(/^\s*<\s*|\s*>\s*$/g, "")
+        .replace(/\\([\\`*_{}\[\]()#+\-.!])/g, "$1");
+      url = resolveUrl(url, source);
+      var text = cleanInlineMarkdown(decodeEntities(label)).replace(/\s+/g, " ").trim() || url;
+      if (isCitationLink(text, url)) return;
       if (!isSafeHttpUrl(url)) return;
-      var text = decodeEntities(label).replace(/\s+/g, " ").trim() || url;
       var key = url + "\n" + text;
       var n = linkMap[key];
       if (!n) {
@@ -436,31 +528,53 @@
       tokens.push({ t: "link", n: n, v: text, url: url });
     }
 
+    function addImage(alt, rawUrl) {
+      var imgUrl = resolveUrl(String(rawUrl || "").replace(/^\s*<\s*|\s*>\s*$/g, ""), source);
+      if (!isSafeHttpUrl(imgUrl) || images.length >= MAX_IMAGES) return;
+      if (isNoiseImage(alt, imgUrl)) return;
+      var nImg = images.length + 1;
+      images.push({ n: nImg, alt: cleanInlineMarkdown(alt || "").trim(), url: imgUrl, loaded: false });
+      tokens.push({ t: "img", n: nImg, alt: images[nImg - 1].alt, url: imgUrl });
+    }
+
+    function pushText(value) {
+      var text = cleanInlineMarkdown(value);
+      if (!text) return;
+      tokens.push({ t: "text", v: text });
+    }
+
     function consumeInline(line) {
       var i = 0;
       while (i < line.length) {
+        if (line.charAt(i) === "[" && line.charAt(i + 1) === "!" && line.charAt(i + 2) === "[") {
+          var wrapAltEnd = line.indexOf("]", i + 3);
+          if (wrapAltEnd >= 0 && line.charAt(wrapAltEnd + 1) === "(") {
+            var wrapImg = readMdUrl(line, wrapAltEnd + 1);
+            if (wrapImg) {
+              addImage(line.slice(i + 3, wrapAltEnd), wrapImg.url);
+              var afterImg = wrapImg.end;
+              if (line.charAt(afterImg) === "]" && line.charAt(afterImg + 1) === "(") {
+                var wrapDest = readMdUrl(line, afterImg + 1);
+                if (wrapDest) afterImg = wrapDest.end;
+              }
+              i = afterImg;
+              continue;
+            }
+          }
+        }
         if (line.charAt(i) === "!" && line.charAt(i + 1) === "[") {
           var altEnd = line.indexOf("]", i + 2);
           if (altEnd >= 0 && line.charAt(altEnd + 1) === "(") {
             var imgDest = readMdUrl(line, altEnd + 1);
             if (imgDest) {
-              if (i > 0) {
-                /* preceding text handled below via last */
-              }
-              var imgUrl = resolveUrl(imgDest.url.replace(/^\s*<\s*|\s*>\s*$/g, ""), source);
-              if (isSafeHttpUrl(imgUrl) && images.length < MAX_IMAGES) {
-                var alt = (line.slice(i + 2, altEnd) || "").trim();
-                var nImg = images.length + 1;
-                images.push({ n: nImg, alt: alt, url: imgUrl, loaded: false });
-                tokens.push({ t: "img", n: nImg, alt: alt, url: imgUrl });
-              }
+              addImage(line.slice(i + 2, altEnd), imgDest.url);
               i = imgDest.end;
               continue;
             }
           }
         }
         if (line.charAt(i) === "[") {
-          var labelEnd = line.indexOf("]", i + 1);
+          var labelEnd = findLabelEnd(line, i);
           if (labelEnd >= 0 && line.charAt(labelEnd + 1) === "(") {
             var linkDest = readMdUrl(line, labelEnd + 1);
             if (linkDest) {
@@ -475,13 +589,12 @@
         var next = line.length;
         if (nextBang >= 0) next = Math.min(next, nextBang);
         if (nextLink >= 0) next = Math.min(next, nextLink);
-        // If current char didn't start a mark, emit text through next candidate.
         if (line.charAt(i) !== "[" && !(line.charAt(i) === "!" && line.charAt(i + 1) === "[")) {
-          tokens.push({ t: "text", v: line.slice(i, next) });
+          pushText(line.slice(i, next));
           i = next;
           continue;
         }
-        tokens.push({ t: "text", v: line.charAt(i) });
+        pushText(line.charAt(i));
         i += 1;
       }
     }
@@ -489,8 +602,20 @@
     var lines = md.split("\n");
     for (var li = 0; li < lines.length; li++) {
       if (tokens.length) tokens.push({ t: "nl" });
-      consumeInline(lines[li]);
+      consumeInline(preprocessMdLine(lines[li]));
     }
+    var cleaned = [];
+    for (var ti = 0; ti < tokens.length; ti++) {
+      var tok = tokens[ti];
+      if (tok.t === "text") {
+        var v = String(tok.v || "").replace(/^[_*]+/, "").replace(/[_*]+$/, "");
+        if (!v) continue;
+        cleaned.push({ t: "text", v: v });
+      } else {
+        cleaned.push(tok);
+      }
+    }
+    tokens = cleaned;
     return {
       title: title || hostOf(source) || "untitled",
       url: source,

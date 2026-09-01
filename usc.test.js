@@ -159,6 +159,61 @@ assert.strictEqual(md.title, "Demo");
 assert.strictEqual(md.links[0].url, "https://ex.com/a");
 assert.strictEqual(md.images[0].url, "https://ex.com/img.png");
 
+var titledMd = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\nSee [salutation](https://en.wikipedia.org/wiki/Salutation \"Salutation\") now.\n",
+  "https://ex.com/"
+);
+assert.strictEqual(titledMd.links[0].url, "https://en.wikipedia.org/wiki/Salutation");
+assert.strictEqual(titledMd.links[0].text, "salutation");
+assert.ok(Browser.pageToPlainText(titledMd).indexOf("[1] salutation") >= 0);
+assert.ok(Browser.pageToPlainText(titledMd).indexOf("](") < 0);
+
+var citeMd = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://en.wikipedia.org/wiki/Hello\n\nMarkdown Content:\nHello.[[1]](https://en.wikipedia.org/wiki/Hello#cite_note-1) Next.\n",
+  "https://en.wikipedia.org/wiki/Hello"
+);
+assert.strictEqual(citeMd.links.length, 0);
+assert.ok(Browser.pageToPlainText(citeMd).indexOf("Hello.") >= 0);
+assert.ok(Browser.pageToPlainText(citeMd).indexOf("cite_note") < 0);
+
+var emphMd = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n_**Hello**_ is a word.\n",
+  "https://ex.com/"
+);
+assert.ok(Browser.pageToPlainText(emphMd).indexOf("Hello is a word") >= 0);
+assert.ok(Browser.pageToPlainText(emphMd).indexOf("**") < 0);
+
+var pairEmph = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\nan alteration of _hallo_, _hollo_, which came\n",
+  "https://ex.com/"
+);
+assert.ok(Browser.pageToPlainText(pairEmph).indexOf("hallo, hollo, which") >= 0);
+assert.ok(Browser.pageToPlainText(pairEmph).indexOf("hollo_") < 0);
+
+var tableMd = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n| Released | 23 October 2015 |\n| --- | --- |\n",
+  "https://ex.com/"
+);
+var tablePlain = Browser.pageToPlainText(tableMd);
+assert.ok(tablePlain.indexOf("Released") >= 0);
+assert.ok(tablePlain.indexOf("23 October 2015") >= 0);
+assert.ok(tablePlain.indexOf("| ---") < 0);
+
+var wrappedImg = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n[![Image 1: cat](https://ex.com/cat.png)](https://ex.com/file)\n",
+  "https://ex.com/"
+);
+assert.strictEqual(wrappedImg.images.length, 1);
+assert.strictEqual(wrappedImg.images[0].url, "https://ex.com/cat.png");
+
+var escaped = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://en.wikipedia.org/wiki/Hello\n\nMarkdown Content:\nthe _[Norwich Courier](https://en.wikipedia.org/wiki/Norwich\\_Courier \"Norwich Courier\")_ of town\n",
+  "https://en.wikipedia.org/wiki/Hello"
+);
+assert.strictEqual(escaped.links[0].url, "https://en.wikipedia.org/wiki/Norwich_Courier");
+assert.ok(Browser.pageToPlainText(escaped).indexOf("Norwich Courier") >= 0);
+assert.ok(Browser.pageToPlainText(escaped).indexOf("_Courier") < 0);
+
 assert.strictEqual(
   USC.ENGINES.google.searchUrl("hello world"),
   "https://www.google.com/search?q=hello%20world&hl=zh-CN"
