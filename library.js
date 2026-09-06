@@ -163,7 +163,8 @@
     var t = String(text || "").replace(/^\s+|\s+$/g, "");
     if (!t) return false;
     if (/^type to search/.test(t)) return true;
-    if (/^(continue|recent|bookmarks|session|this session)$/.test(t)) return true;
+    if (/^(continue|recent|bookmarks|session|this session|related)$/.test(t)) return true;
+    if (/^searching/.test(t) || /^no results/.test(t)) return true;
     if (/^(theme|proxy|images|font)\b/.test(t)) return true;
     if (/^nothing here/.test(t) || /^star a page/.test(t) || /^no bookmarks/.test(t)) return true;
     if (/^loading/.test(t) || /^fetch failed/.test(t) || /^real  open/.test(t)) return true;

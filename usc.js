@@ -568,6 +568,7 @@
       }
       if (u.pathname.indexOf("/y.js") >= 0) return false;
       if (u.hostname.indexOf("bing.com") >= 0 && u.pathname.indexOf("/th") === 0) return false;
+      if (Browser.isNoiseWikiUrl && Browser.isNoiseWikiUrl(url)) return false;
       return true;
     } catch (e) {
       return false;
@@ -1243,22 +1244,31 @@
         setStatus(surface);
         return;
       }
-      var host = current.url;
-      try {
-        host = new URL(current.url).host.replace(/^www\./, "");
-      } catch (e) {}
-      if (current.url.indexOf("usc.local/search") >= 0) host = "search";
-      var bits = [current.title || host];
-      if (current.title && current.title !== host) bits.push(host);
-      if (current.links && current.links.length) bits.push(String(current.links.length));
-      var mins = Library.readingMinutes(Browser.pageToPlainText(current));
-      if (mins) bits.push(mins + " min");
+      var bits = [];
+      if (current.url && String(current.url).indexOf("usc.local/search") >= 0) {
+        bits.push("search");
+        if (current.links && current.links.length) bits.push(String(current.links.length));
+      } else {
+        var host = "";
+        try {
+          host = new URL(current.url).host.replace(/^www\./, "");
+        } catch (e) {}
+        bits.push(current.title || host || "");
+        var mins = Library.readingMinutes(Browser.pageToPlainText(current));
+        if (mins) bits.push(mins + " min");
+      }
       if (view !== "page") bits.push(view);
       if (imagesMode === "on") bits.push("img");
       if (current.via && current.via.indexOf("jina-") === 0) bits.push("via jina");
       else if (current.via && current.via.indexOf("search:") === 0) bits.push(current.via.slice(7));
       if (current.truncated) bits.push("cut");
-      setStatus(bits.join("    "));
+      setStatus(
+        bits
+          .filter(function (bit) {
+            return bit;
+          })
+          .join("    ")
+      );
     }
 
     function appendFindText(parent, text) {
@@ -1311,7 +1321,11 @@
             mark.textContent = tok.v;
             page.appendChild(mark);
             sawMark = true;
-          } else if (Library.isSurfaceUrl(documentModel.url) && Library.isSectionLabel(tok.v)) {
+          } else if (
+            (Library.isSurfaceUrl(documentModel.url) ||
+              (documentModel.url && String(documentModel.url).indexOf("usc.local/search") >= 0)) &&
+            Library.isSectionLabel(tok.v)
+          ) {
             var sec = doc.createElement("span");
             sec.className = "sec";
             sec.textContent = tok.v;

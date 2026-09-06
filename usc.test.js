@@ -190,6 +190,32 @@ var pairEmph = Browser.markdownToDocument(
 assert.ok(Browser.pageToPlainText(pairEmph).indexOf("hallo, hollo, which") >= 0);
 assert.ok(Browser.pageToPlainText(pairEmph).indexOf("hollo_") < 0);
 
+var readerMd = Browser.markdownToDocument(
+  "Title: Hello\nURL Source: https://en.wikipedia.org/wiki/Hello\n\nMarkdown Content:\n" +
+    "From Wikipedia, the free encyclopedia\n\n" +
+    "Hello is a [greeting](https://en.wikipedia.org/wiki/Greeting \"Greeting\").\n\n" +
+    "## See also\n\n[Salutation](https://en.wikipedia.org/wiki/Salutation)\n\n" +
+    "## References\n\n1. Oxford English Dictionary\n\n" +
+    "## External links\n\n[dict](https://www.merriam-webster.com/dictionary/hello)\n",
+  "https://en.wikipedia.org/wiki/Hello"
+);
+var readerPlain = Browser.pageToPlainText(readerMd);
+assert.ok(readerPlain.indexOf("From Wikipedia") < 0);
+assert.ok(readerPlain.indexOf("greeting") >= 0);
+assert.ok(readerPlain.indexOf("See also") >= 0);
+assert.ok(readerPlain.indexOf("Salutation") >= 0);
+assert.ok(readerPlain.indexOf("Oxford English Dictionary") < 0);
+assert.ok(readerPlain.indexOf("merriam-webster") < 0);
+assert.ok(!readerMd.links.some(function (link) {
+  return /File:|Help:|Wikipedia:/.test(link.url);
+}));
+
+var fileSkip = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://en.wikipedia.org/wiki/Hello\n\nMarkdown Content:\nSee [file](https://en.wikipedia.org/wiki/File:Hello.jpg) and [Help](https://en.wikipedia.org/wiki/Help:Contents).\n",
+  "https://en.wikipedia.org/wiki/Hello"
+);
+assert.strictEqual(fileSkip.links.length, 0);
+
 var tableMd = Browser.markdownToDocument(
   "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n| Released | 23 October 2015 |\n| --- | --- |\n",
   "https://ex.com/"
@@ -213,6 +239,50 @@ var escaped = Browser.markdownToDocument(
 assert.strictEqual(escaped.links[0].url, "https://en.wikipedia.org/wiki/Norwich_Courier");
 assert.ok(Browser.pageToPlainText(escaped).indexOf("Norwich Courier") >= 0);
 assert.ok(Browser.pageToPlainText(escaped).indexOf("_Courier") < 0);
+
+var citeNeeded = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://en.wikipedia.org/wiki/Hello\n\nMarkdown Content:\nAnglo Saxon eala.[_[citation needed](https://en.wikipedia.org/wiki/Wikipedia:Citation_needed \"Wikipedia:Citation needed\")_] Next.\n",
+  "https://en.wikipedia.org/wiki/Hello"
+);
+var citeNeededPlain = Browser.pageToPlainText(citeNeeded);
+assert.ok(citeNeededPlain.indexOf("eala.") >= 0);
+assert.ok(citeNeededPlain.indexOf("[]") < 0);
+assert.ok(citeNeededPlain.indexOf("citation") < 0);
+
+var weasel = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://en.wikipedia.org/wiki/Python_(programming_language)\n\nMarkdown Content:\nMost[_[which?](https://en.wikipedia.org/wiki/Wikipedia:Avoid_weasel_words \"Wikipedia:Avoid weasel words\")_] Python implementations.\n",
+  "https://en.wikipedia.org/wiki/Python_(programming_language)"
+);
+assert.ok(Browser.pageToPlainText(weasel).indexOf("Most Python") >= 0);
+assert.ok(Browser.pageToPlainText(weasel).indexOf("[]") < 0);
+
+var bookTitle = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://en.wikipedia.org/wiki/Hello\n\nMarkdown Content:\ncalled _The Sketches and Eccentricities of Col. David Crockett, of West Tennessee_, which\n",
+  "https://en.wikipedia.org/wiki/Hello"
+);
+var bookPlain = Browser.pageToPlainText(bookTitle);
+assert.ok(bookPlain.indexOf("The Sketches and Eccentricities of Col. David Crockett") >= 0);
+assert.ok(bookPlain.indexOf("_The") < 0);
+
+var snake = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\nuse x_train_size here\n",
+  "https://ex.com/"
+);
+assert.ok(Browser.pageToPlainText(snake).indexOf("x_train_size") >= 0);
+
+var infobox = Browser.markdownToDocument(
+  "Title: Python\nURL Source: https://en.wikipedia.org/wiki/Python_(programming_language)\n\nMarkdown Content:\n| Python |\n| --- |\n| [Paradigm](https://en.wikipedia.org/wiki/Programming_paradigm) | Multi |\n\n**Python** is a language.\n",
+  "https://en.wikipedia.org/wiki/Python_(programming_language)"
+);
+var infoboxPlain = Browser.pageToPlainText(infobox);
+assert.ok(infoboxPlain.indexOf("Python is a language") >= 0);
+assert.ok(infoboxPlain.indexOf("Paradigm") < 0);
+
+var keepTable = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n| Released | 23 October 2015 |\n| --- | --- |\n",
+  "https://ex.com/"
+);
+assert.ok(Browser.pageToPlainText(keepTable).indexOf("Released") >= 0);
 
 assert.strictEqual(
   USC.ENGINES.google.searchUrl("hello world"),
@@ -324,6 +394,13 @@ assert.strictEqual(
     "https://ex.com/"
   ).links[0].url,
   "https://en.wikipedia.org/wiki/Python_(programming_language)"
+);
+assert.strictEqual(
+  Browser.markdownToDocument(
+    "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n[\"Hello, World!\" program](https://en.wikipedia.org/wiki/%22Hello,_World!%22_program \"\\\"Hello, World!\\\" program\")\n",
+    "https://ex.com/"
+  ).links[0].url,
+  "https://en.wikipedia.org/wiki/%22Hello,_World!%22_program"
 );
 assert.strictEqual(
   Browser.markdownToDocument(
