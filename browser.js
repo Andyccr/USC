@@ -200,6 +200,7 @@
 
     function addLink(url, text) {
       text = text.replace(/\s+/g, " ").trim();
+      if (isCitationLink(text, url) || isNoiseWikiUrl(url)) return;
       if (!text || !isSafeHttpUrl(url) || links.length >= MAX_LINKS) {
         if (text) {
           tokens.push({ t: "text", v: text });
@@ -350,6 +351,19 @@
     }
   }
 
+  function skipQuoted(line, from) {
+    var quote = line.charAt(from);
+    if (quote !== '"' && quote !== "'") return -1;
+    for (var i = from + 1; i < line.length; i++) {
+      if (line.charAt(i) === "\\") {
+        i += 1;
+        continue;
+      }
+      if (line.charAt(i) === quote) return i + 1;
+    }
+    return -1;
+  }
+
   function readMdUrl(line, openIdx) {
     // openIdx points at '(' of ](url), ](<url>), or ](url "title")
     var i = openIdx + 1;
@@ -360,10 +374,8 @@
       var end = close + 1;
       while (end < line.length && /\s/.test(line.charAt(end))) end += 1;
       if (line.charAt(end) === '"' || line.charAt(end) === "'") {
-        var q = line.charAt(end);
-        var closeQ = line.indexOf(q, end + 1);
-        if (closeQ < 0) return null;
-        end = closeQ + 1;
+        end = skipQuoted(line, end);
+        if (end < 0) return null;
         while (end < line.length && /\s/.test(line.charAt(end))) end += 1;
       }
       if (line.charAt(end) !== ")") return null;
@@ -381,11 +393,9 @@
         var url = line.slice(start, i);
         var j = i;
         while (j < line.length && /\s/.test(line.charAt(j))) j += 1;
-        var quote = line.charAt(j);
-        if (quote === '"' || quote === "'") {
-          var endQuote = line.indexOf(quote, j + 1);
-          if (endQuote < 0) return null;
-          j = endQuote + 1;
+        if (line.charAt(j) === '"' || line.charAt(j) === "'") {
+          j = skipQuoted(line, j);
+          if (j < 0) return null;
           while (j < line.length && /\s/.test(line.charAt(j))) j += 1;
         }
         if (line.charAt(j) !== ")") return null;
@@ -446,29 +456,37 @@
     var out = String(s || "");
     out = out.replace(/\\([\\`*_{}\[\]()#+\-.!])/g, "$1");
     var n;
-    for (n = 0; n < 3; n++) {
+    for (n = 0; n < 4; n++) {
       var next = out
         .replace(/\*\*([^*]+)\*\*/g, "$1")
-        .replace(/__([^_\s]+)__/g, "$1")
-        .replace(/\*([^*\s]+)\*/g, "$1")
-        .replace(/_([^_\s]+)_/g, "$1");
+        .replace(/__([^_\n]{1,120})__/g, "$1")
+        .replace(/(^|[\s(\["'‘“])\*([^*\n]{1,120})\*([\s)\].,;:!?\"'’”;]|$)/g, "$1$2$3")
+        .replace(/(^|[\s(\["'‘“])_([^_\n]{1,120})_([\s)\].,;:!?\"'’”;]|$)/g, "$1$2$3");
       if (next === out) break;
       out = next;
     }
     return out.replace(/`([^`]+)`/g, "$1");
   }
 
+  function isWikiHost(url) {
+    try {
+      var host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+      return (
+        host.indexOf("wikipedia.org") >= 0 ||
+        host.indexOf("wikimedia.org") >= 0 ||
+        host.indexOf("wiktionary.org") >= 0 ||
+        host.indexOf("wikidata.org") >= 0 ||
+        host.indexOf("wikibooks.org") >= 0
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
   function isNoiseWikiUrl(url) {
     try {
       var u = new URL(url);
-      var host = u.hostname.replace(/^www\./, "").toLowerCase();
-      if (
-        host.indexOf("wikipedia.org") < 0 &&
-        host.indexOf("wikimedia.org") < 0 &&
-        host.indexOf("wiktionary.org") < 0
-      ) {
-        return false;
-      }
+      if (!isWikiHost(u.href)) return false;
       var path = decodeURIComponent(u.pathname || "");
       if (/\/wiki\/(File|Help|Wikipedia|Template|Special|Talk|User|Portal|MediaWiki|Category|Draft):/i.test(path)) {
         return true;
@@ -506,7 +524,7 @@
     if (!s) return false;
     if (/^from wikipedia, the free encyclopedia$/i.test(s)) return true;
     if (/^jump to (content|navigation|search)$/i.test(s)) return true;
-    if (/^contents$/i.test(s)) return true;
+    if (/^contents$/i.test(s) || /^#{1,6}\s+contents$/i.test(s)) return true;
     if (/^\[edit\]$/i.test(s) || /^edit$/i.test(s)) return true;
     return false;
   }
@@ -517,10 +535,51 @@
     for (var i = 0; i < lines.length; i++) {
       var title = headingTitle(lines[i]);
       if (title && isAppendixHeading(title)) break;
+      if (title && /^contents$/i.test(title)) continue;
       if (isChromeLine(lines[i])) continue;
       out.push(lines[i]);
     }
     return out.join("\n");
+  }
+
+  function dropLeadingInfobox(md) {
+    var lines = String(md || "").split("\n");
+    var i = 0;
+    while (i < lines.length && !String(lines[i]).replace(/^\s+|\s+$/g, "")) i += 1;
+    if (i >= lines.length) return md;
+    var first = String(lines[i]).replace(/^\s+/, "");
+    if (first.charAt(0) !== "|") return md;
+    while (i < lines.length) {
+      var s = String(lines[i]).replace(/^\s+/, "");
+      if (!s || s.charAt(0) === "|" || /^(-{3,}|\*{3,}|_{3,})\s*$/.test(s)) {
+        i += 1;
+        continue;
+      }
+      break;
+    }
+    return lines.slice(i).join("\n");
+  }
+
+  function isEditorialWikiText(text) {
+    return /^(citation needed|failed verification|clarification needed|please clarify|who\??|which\??|when\??|where\??|dubious|according to whom\??)$/i.test(
+      String(text || "").replace(/[\[\]]/g, "").replace(/^\s+|\s+$/g, "")
+    );
+  }
+
+  function stripWikiEditorial(s) {
+    var out = String(s || "");
+    var prev = "";
+    while (out !== prev) {
+      prev = out;
+      out = out.replace(/\[[^\]]*\]\([^)]*#cite_(?:note|ref)[^)]*\)/gi, "");
+      out = out.replace(/\[_?\[[^\]]+\]\([^)]*\)_?\]/g, function (m) {
+        if (/\/wiki\/(?:Wikipedia|Help|Template):/i.test(m) || isEditorialWikiText(m)) return "";
+        return m;
+      });
+      out = out.replace(/\[[^\]]*\]\([^)]*\/wiki\/(?:Wikipedia|Help|Template):[^)]*\)/gi, "");
+      out = out.replace(/\[\s*\]/g, "");
+    }
+    return out;
   }
 
   function isCitationLink(text, url) {
@@ -528,21 +587,25 @@
       .replace(/[\[\]]/g, "")
       .replace(/\s+/g, "")
       .trim();
+    var href = String(url || "");
+    if (isEditorialWikiText(text) || isEditorialWikiText(label)) return true;
+    if (/citation.needed|failed.verification|clarification.needed/i.test(String(text || "") + href)) return true;
+    if (/#cite_(note|ref)|#endnote|#fn\b/i.test(href)) return true;
     if (/^\d+$/.test(label)) return true;
-    if (/citation.needed/i.test(String(text || "")) || /Citation_needed/i.test(String(url || ""))) return true;
-    return /#cite_(note|ref)|#endnote|#fn\b/i.test(String(url || ""));
+    if (/^[a-z]$/i.test(label) && /#cite_|\/wiki\/.*#/.test(href)) return true;
+    return false;
   }
 
   function isNoiseImage(alt, url) {
     var a = String(alt || "").toLowerCase();
     var u = String(url || "").toLowerCase();
-    if (/semi-protected|protection policy|edit this|listen\b|disambiguation/.test(a)) return true;
+    if (/semi-protected|protection policy|edit this|listen\b|disambiguation|wikibooks logo/.test(a)) return true;
     if (/\/(?:16|20|24)px-/.test(u)) return true;
     return false;
   }
 
   function preprocessMdLine(line) {
-    var s = String(line || "").replace(/^\s+/, "");
+    var s = stripWikiEditorial(String(line || "").replace(/^\s+/, ""));
     if (!s) return "";
     if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(s)) return "";
     if (/^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(s)) return "";
@@ -557,7 +620,7 @@
         .join("  ·  ");
     }
     if (/^>\s?/.test(s)) s = s.replace(/^>\s?/, "");
-    return s;
+    return stripWikiEditorial(s);
   }
 
   function markdownToDocument(text, baseUrl) {
@@ -570,10 +633,13 @@
     if (mUrl) source = mUrl[1].trim();
     var idx = raw.indexOf("Markdown Content:");
     var md = idx >= 0 ? raw.slice(idx + "Markdown Content:".length) : raw;
+    var remote = true;
     try {
-      if (source && new URL(source).hostname !== "usc.local") md = trimReaderMarkdown(md);
-    } catch (e) {
+      remote = !source || new URL(source).hostname !== "usc.local";
+    } catch (e) {}
+    if (remote) {
       md = trimReaderMarkdown(md);
+      if (isWikiHost(source)) md = dropLeadingInfobox(md);
     }
     var tokens = [];
     var links = [];
@@ -602,9 +668,11 @@
       var imgUrl = resolveUrl(String(rawUrl || "").replace(/^\s*<\s*|\s*>\s*$/g, ""), source);
       if (!isSafeHttpUrl(imgUrl) || images.length >= MAX_IMAGES) return;
       if (isNoiseImage(alt, imgUrl)) return;
+      var label = cleanInlineMarkdown(alt || "").replace(/\s+/g, " ").trim();
+      if (/^image\s*\d+$/i.test(label)) label = "";
       var nImg = images.length + 1;
-      images.push({ n: nImg, alt: cleanInlineMarkdown(alt || "").trim(), url: imgUrl, loaded: false });
-      tokens.push({ t: "img", n: nImg, alt: images[nImg - 1].alt, url: imgUrl });
+      images.push({ n: nImg, alt: label, url: imgUrl, loaded: false });
+      tokens.push({ t: "img", n: nImg, alt: label, url: imgUrl });
     }
 
     function pushText(value) {
@@ -680,8 +748,10 @@
       if (tok.t === "text") {
         var v = String(tok.v || "")
           .replace(/^[_*]+/, "")
-          .replace(/[_*]+$/, "")
-          .replace(/\[\s*\]/g, "");
+          .replace(/[_*]+(?=[\s.,;:!?\"')\]‘’“”]|$)/g, "")
+          .replace(/_+(?=[‘’“”"'`\[])/g, "")
+          .replace(/\[\s*\]/g, "")
+          .replace(/\s+([.,;:!?])/g, "$1");
         if (!v) continue;
         cleaned.push({ t: "text", v: v });
       } else {
@@ -911,6 +981,7 @@
         .replace(/\s+/g, " ")
         .trim();
       if (isNoiseImage(alt, src)) return;
+      if (/^image\s*\d+$/i.test(alt)) alt = "";
       var n = images.length + 1;
       images.push({ n: n, alt: alt, url: src, loaded: false });
       tokens.push({ t: "img", n: n, alt: alt, url: src });
@@ -940,7 +1011,9 @@
           : String(node.className || "").toLowerCase();
       if (
         /^(references|notes|footnotes|external_links|further_reading|bibliography|toc)$/.test(nodeId) ||
-        /\b(references|reflist|mw-references-wrap|navbox|toc|sistersitebox|mw-editsection)\b/.test(nodeClass)
+        /\b(references|reflist|mw-references-wrap|navbox|toc|sistersitebox|mw-editsection|infobox|mbox|ambox|sidebar)\b/.test(
+          nodeClass
+        )
       ) {
         return;
       }
