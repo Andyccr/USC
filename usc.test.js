@@ -190,6 +190,32 @@ var pairEmph = Browser.markdownToDocument(
 assert.ok(Browser.pageToPlainText(pairEmph).indexOf("hallo, hollo, which") >= 0);
 assert.ok(Browser.pageToPlainText(pairEmph).indexOf("hollo_") < 0);
 
+var readerMd = Browser.markdownToDocument(
+  "Title: Hello\nURL Source: https://en.wikipedia.org/wiki/Hello\n\nMarkdown Content:\n" +
+    "From Wikipedia, the free encyclopedia\n\n" +
+    "Hello is a [greeting](https://en.wikipedia.org/wiki/Greeting \"Greeting\").\n\n" +
+    "## See also\n\n[Salutation](https://en.wikipedia.org/wiki/Salutation)\n\n" +
+    "## References\n\n1. Oxford English Dictionary\n\n" +
+    "## External links\n\n[dict](https://www.merriam-webster.com/dictionary/hello)\n",
+  "https://en.wikipedia.org/wiki/Hello"
+);
+var readerPlain = Browser.pageToPlainText(readerMd);
+assert.ok(readerPlain.indexOf("From Wikipedia") < 0);
+assert.ok(readerPlain.indexOf("greeting") >= 0);
+assert.ok(readerPlain.indexOf("See also") >= 0);
+assert.ok(readerPlain.indexOf("Salutation") >= 0);
+assert.ok(readerPlain.indexOf("Oxford English Dictionary") < 0);
+assert.ok(readerPlain.indexOf("merriam-webster") < 0);
+assert.ok(!readerMd.links.some(function (link) {
+  return /File:|Help:|Wikipedia:/.test(link.url);
+}));
+
+var fileSkip = Browser.markdownToDocument(
+  "Title: t\nURL Source: https://en.wikipedia.org/wiki/Hello\n\nMarkdown Content:\nSee [file](https://en.wikipedia.org/wiki/File:Hello.jpg) and [Help](https://en.wikipedia.org/wiki/Help:Contents).\n",
+  "https://en.wikipedia.org/wiki/Hello"
+);
+assert.strictEqual(fileSkip.links.length, 0);
+
 var tableMd = Browser.markdownToDocument(
   "Title: t\nURL Source: https://ex.com/\n\nMarkdown Content:\n| Released | 23 October 2015 |\n| --- | --- |\n",
   "https://ex.com/"

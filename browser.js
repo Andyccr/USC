@@ -458,6 +458,71 @@
     return out.replace(/`([^`]+)`/g, "$1");
   }
 
+  function isNoiseWikiUrl(url) {
+    try {
+      var u = new URL(url);
+      var host = u.hostname.replace(/^www\./, "").toLowerCase();
+      if (
+        host.indexOf("wikipedia.org") < 0 &&
+        host.indexOf("wikimedia.org") < 0 &&
+        host.indexOf("wiktionary.org") < 0
+      ) {
+        return false;
+      }
+      var path = decodeURIComponent(u.pathname || "");
+      if (/\/wiki\/(File|Help|Wikipedia|Template|Special|Talk|User|Portal|MediaWiki|Category|Draft):/i.test(path)) {
+        return true;
+      }
+      if (path.indexOf("/w/index.php") === 0) return true;
+      if (u.searchParams.get("action") === "edit") return true;
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function headingTitle(line) {
+    var s = String(line || "").replace(/^\s+/, "");
+    var m = s.match(/^#{1,6}\s+(.+?)\s*$/);
+    if (!m) return "";
+    return m[1]
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/[*_`]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function isAppendixHeading(title) {
+    var t = String(title || "").toLowerCase();
+    return /^(references|notes|footnotes|bibliography|citations|external links|further reading|sources|works cited|notes and references|参考文献|参考资料|注释|脚注|外部链接|延伸阅读|来源)$/.test(
+      t
+    );
+  }
+
+  function isChromeLine(line) {
+    var s = String(line || "")
+      .replace(/^\s+|\s+$/g, "")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+    if (!s) return false;
+    if (/^from wikipedia, the free encyclopedia$/i.test(s)) return true;
+    if (/^jump to (content|navigation|search)$/i.test(s)) return true;
+    if (/^contents$/i.test(s)) return true;
+    if (/^\[edit\]$/i.test(s) || /^edit$/i.test(s)) return true;
+    return false;
+  }
+
+  function trimReaderMarkdown(md) {
+    var lines = String(md || "").split("\n");
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var title = headingTitle(lines[i]);
+      if (title && isAppendixHeading(title)) break;
+      if (isChromeLine(lines[i])) continue;
+      out.push(lines[i]);
+    }
+    return out.join("\n");
+  }
+
   function isCitationLink(text, url) {
     var label = String(text || "")
       .replace(/[\[\]]/g, "")
@@ -505,6 +570,11 @@
     if (mUrl) source = mUrl[1].trim();
     var idx = raw.indexOf("Markdown Content:");
     var md = idx >= 0 ? raw.slice(idx + "Markdown Content:".length) : raw;
+    try {
+      if (source && new URL(source).hostname !== "usc.local") md = trimReaderMarkdown(md);
+    } catch (e) {
+      md = trimReaderMarkdown(md);
+    }
     var tokens = [];
     var links = [];
     var images = [];
@@ -516,7 +586,7 @@
         .replace(/\\([\\`*_{}\[\]()#+\-.!])/g, "$1");
       url = resolveUrl(url, source);
       var text = cleanInlineMarkdown(decodeEntities(label)).replace(/\s+/g, " ").trim() || url;
-      if (isCitationLink(text, url)) return;
+      if (isCitationLink(text, url) || isNoiseWikiUrl(url)) return;
       if (!isSafeHttpUrl(url)) return;
       var key = url + "\n" + text;
       var n = linkMap[key];
@@ -608,7 +678,10 @@
     for (var ti = 0; ti < tokens.length; ti++) {
       var tok = tokens[ti];
       if (tok.t === "text") {
-        var v = String(tok.v || "").replace(/^[_*]+/, "").replace(/[_*]+$/, "");
+        var v = String(tok.v || "")
+          .replace(/^[_*]+/, "")
+          .replace(/[_*]+$/, "")
+          .replace(/\[\s*\]/g, "");
         if (!v) continue;
         cleaned.push({ t: "text", v: v });
       } else {
@@ -803,6 +876,9 @@
         pushText(text);
         return;
       }
+      if (isCitationLink(text, url) || isNoiseWikiUrl(url)) {
+        return;
+      }
       if (chars + text.length > MAX_CHARS) {
         pushText(text);
         return;
@@ -830,9 +906,11 @@
       var width = parseInt(element.getAttribute("width"), 10) || element.width || 0;
       var height = parseInt(element.getAttribute("height"), 10) || element.height || 0;
       if (!isSafeHttpUrl(src) || (width === 1 && height === 1)) return;
+      if (width > 0 && width < 32 && height > 0 && height < 32) return;
       var alt = (element.getAttribute("alt") || element.getAttribute("title") || "")
         .replace(/\s+/g, " ")
         .trim();
+      if (isNoiseImage(alt, src)) return;
       var n = images.length + 1;
       images.push({ n: n, alt: alt, url: src, loaded: false });
       tokens.push({ t: "img", n: n, alt: alt, url: src });
@@ -852,6 +930,17 @@
         SKIP[name] ||
         node.hasAttribute("hidden") ||
         node.getAttribute("aria-hidden") === "true"
+      ) {
+        return;
+      }
+      var nodeId = (node.id || "").toLowerCase();
+      var nodeClass =
+        typeof node.className === "string"
+          ? node.className.toLowerCase()
+          : String(node.className || "").toLowerCase();
+      if (
+        /^(references|notes|footnotes|external_links|further_reading|bibliography|toc)$/.test(nodeId) ||
+        /\b(references|reflist|mw-references-wrap|navbox|toc|sistersitebox|mw-editsection)\b/.test(nodeClass)
       ) {
         return;
       }
@@ -934,6 +1023,7 @@
     htmlToDocument: htmlToDocument,
     markdownToDocument: markdownToDocument,
     firstMarkdownLink: firstMarkdownLink,
+    isNoiseWikiUrl: isNoiseWikiUrl,
     parseFetched: parseFetched,
     pageToPlainText: pageToPlainText,
     outlineText: outlineText,

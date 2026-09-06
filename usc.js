@@ -568,6 +568,7 @@
       }
       if (u.pathname.indexOf("/y.js") >= 0) return false;
       if (u.hostname.indexOf("bing.com") >= 0 && u.pathname.indexOf("/th") === 0) return false;
+      if (Browser.isNoiseWikiUrl && Browser.isNoiseWikiUrl(url)) return false;
       return true;
     } catch (e) {
       return false;
@@ -1311,7 +1312,11 @@
             mark.textContent = tok.v;
             page.appendChild(mark);
             sawMark = true;
-          } else if (Library.isSurfaceUrl(documentModel.url) && Library.isSectionLabel(tok.v)) {
+          } else if (
+            (Library.isSurfaceUrl(documentModel.url) ||
+              (documentModel.url && String(documentModel.url).indexOf("usc.local/search") >= 0)) &&
+            Library.isSectionLabel(tok.v)
+          ) {
             var sec = doc.createElement("span");
             sec.className = "sec";
             sec.textContent = tok.v;
