@@ -177,6 +177,12 @@
     document.body.removeChild(a);
   }
 
+  function eventElement(target) {
+    if (!target) return null;
+    if (target.nodeType === 1) return target;
+    return target.parentElement || null;
+  }
+
   function storageGet(key, fallback) {
     try {
       var raw = localStorage.getItem(key);
