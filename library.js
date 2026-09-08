@@ -13,6 +13,48 @@
   var BOOKMARKS = "https://usc.local/bookmarks";
   var HELP = "https://usc.local/help";
   var ABOUT = "https://usc.local/about";
+  var SEARCH = "https://usc.local/search";
+
+  var HELP_BODY =
+    "type to search\n" +
+    "url to open\n" +
+    "number to follow a link\n" +
+    "\n" +
+    "back     home     help\n" +
+    "i 1      load image link 1\n" +
+    "i on     always load images\n" +
+    "proxy     auto / on / off\n" +
+    "theme     tap / Alt+T · dark light auto\n" +
+    "settings  appearance · proxy · font\n" +
+    "resume    reopen last page\n" +
+    "star      bookmark / unbookmark\n" +
+    "history   this session\n" +
+    "font +    adjust text size\n" +
+    "copy      copy current URL\n" +
+    "share     share current page\n" +
+    "g hello  google only\n" +
+    "s back   search a command word\n" +
+    "real     open outside\n" +
+    "about     product info\n" +
+    ":cmd     any command\n" +
+    "\n" +
+    "pages stay as text · images stay as links\n";
+
+  var ABOUT_BODY =
+    "USC  plain-text browser\n" +
+    "search · read · stay in-page\n" +
+    "\n" +
+    "theme    dark / light / auto\n" +
+    "         tap the label · Alt+T · theme\n" +
+    "settings  theme · proxy · images · font\n" +
+    "resume    last page after refresh\n" +
+    "star      save this page\n" +
+    "history   this session\n" +
+    "proxy    auto (Jina when blocked)\n" +
+    "images   links until you load them\n" +
+    "\n" +
+    "no backend · no index · no account\n" +
+    "help     commands\n";
 
   function mdHref(url) {
     return "<" + String(url || "").replace(/[<>]/g, "") + ">";
@@ -81,6 +123,39 @@
 
   function isAboutUrl(url) {
     return localPath(url) === "/about";
+  }
+
+  function isSearchUrl(url) {
+    return localPath(url) === "/search";
+  }
+
+  function searchUrl(query) {
+    return SEARCH + "?q=" + encodeURIComponent(query || "");
+  }
+
+  function searchQuery(url) {
+    try {
+      var u = new URL(url);
+      if (u.hostname !== "usc.local" || u.pathname !== "/search") return "";
+      return u.searchParams.get("q") || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function surface(url) {
+    var path = localPath(url);
+    if (!path) return "";
+    if (path === "/") return "home";
+    if (path === "/settings") return "settings";
+    if (path === "/search") return "search";
+    if (path === "/history") return "history";
+    if (path === "/bookmarks") return "bookmarks";
+    if (path === "/help") return "help";
+    if (path === "/about") return "about";
+    if (path === "/resume") return "resume";
+    if (path === "/set") return "set";
+    return "local";
   }
 
   function isAppUrl(url) {
@@ -372,6 +447,35 @@
     );
   }
 
+  function helpMarkdown() {
+    return textMarkdown(
+      "help",
+      HELP,
+      "help\n\n" + HELP_BODY + "\n[settings](" + mdHref(SETTINGS) + ")\n[home](" + mdHref(HOME) + ")\n"
+    );
+  }
+
+  function aboutMarkdown() {
+    return textMarkdown(
+      "about",
+      ABOUT,
+      ABOUT_BODY + "\n[settings](" + mdHref(SETTINGS) + ")\n[help](" + mdHref(HELP) + ")\n[home](" + mdHref(HOME) + ")\n"
+    );
+  }
+
+  function imageMarkdown(url) {
+    var abs = String(url || "");
+    return (
+      "Title: image\nURL Source: " +
+      abs +
+      "\n\nMarkdown Content:\nimage\n\n![image](" +
+      abs +
+      ")\n\n" +
+      abs +
+      "\n\ni 1  load this image\n"
+    );
+  }
+
   return {
     MAX_RECENTS: MAX_RECENTS,
     HOME: HOME,
@@ -381,8 +485,10 @@
     BOOKMARKS: BOOKMARKS,
     HELP: HELP,
     ABOUT: ABOUT,
+    SEARCH: SEARCH,
     mdHref: mdHref,
     hostOf: hostOf,
+    surface: surface,
     isHomeUrl: isHomeUrl,
     isLocalHost: isLocalHost,
     isSettingsUrl: isSettingsUrl,
@@ -392,6 +498,9 @@
     isBookmarksUrl: isBookmarksUrl,
     isHelpUrl: isHelpUrl,
     isAboutUrl: isAboutUrl,
+    isSearchUrl: isSearchUrl,
+    searchUrl: searchUrl,
+    searchQuery: searchQuery,
     isAppUrl: isAppUrl,
     isSurfaceUrl: isSurfaceUrl,
     parseSetUrl: parseSetUrl,
@@ -406,6 +515,9 @@
     historyMarkdown: historyMarkdown,
     bookmarksMarkdown: bookmarksMarkdown,
     textMarkdown: textMarkdown,
+    helpMarkdown: helpMarkdown,
+    aboutMarkdown: aboutMarkdown,
+    imageMarkdown: imageMarkdown,
     loadingMarkdown: loadingMarkdown,
     errorMarkdown: errorMarkdown
   };

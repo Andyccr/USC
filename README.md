@@ -84,12 +84,13 @@ index.html     纯文本 UI、明暗主题、手机适配
 favicon.svg    图标
 manifest.json  可安装为应用
 browser.js     取页、CORS/Jina、HTML/Markdown → 文档模型、纯文本导出
-library.js     本地知识层：最近/继续/书签、首页与设置等产品页
-usc.js         命令解析、搜索流水线、历史栈、主题、渲染与交互
+library.js     本地知识层：usc.local 路由、最近/继续/书签、产品页 markdown
+search.js      搜索引擎、SERP 抽取/去噪、结果页文档
+usc.js         命令解析、go 导航内核、历史栈、主题、渲染与交互
 usc.test.js    无依赖单元测试
 ```
 
-产品页（首页、设置、历史、书签、帮助、关于）都是 **usc.local 上的 markdown 文档**，走同一套 `go` / 点击 / `paint`，而不是另一套 UI。`usc.local` **从不发起网络请求**。打开远程页时立刻换成 loading 文档，成功或失败再替换为正文 / 错误页（点击后不会停在搜索列表上）。
+产品页（首页、设置、历史、书签、帮助、关于）都是 **usc.local 上的 markdown 文档**。所有打开动作走同一套 `go(url)`：`Library.surface(url)` 决定本地页，搜索走 `search.js`，其余才 fetch。`usc.local` **从不发起网络请求**。打开远程页时立刻换成 loading 文档，成功或失败再替换为正文 / 错误页（点击后不会停在搜索列表上）。
 
 #### 总览
 
@@ -102,14 +103,18 @@ flowchart TB
 
   subgraph APP["usc.js"]
     PARSE["parseLine 命令解析"]
-    SEARCH["站内搜索流水线"]
-    NAV["go / 历史栈 / History API"]
+    NAV["go · Library.surface"]
     PAINT["paint 纯文本渲染"]
   end
 
+  subgraph SEARCHMOD["search.js"]
+    SEARCH["引擎 / SERP 抽取 / 结果页"]
+  end
+
   subgraph LIB["library.js"]
-    HOME["home / settings / history / bookmarks"]
+    HOME["home / settings / history / help"]
     SESSION["recents + last · localStorage"]
+    ROUTE["surface(url)"]
   end
 
   subgraph CORE["browser.js"]
@@ -121,9 +126,10 @@ flowchart TB
 
   CHROME -->|Enter| PARSE
   PARSE -->|search| SEARCH
-  PARSE -->|go / follow / 本地页| NAV
+  PARSE -->|url / 编号 / 本地页| NAV
   SEARCH -->|结果页文档| PAINT
-  NAV -->|usc.local 产品页| HOME
+  NAV -->|usc.local| ROUTE
+  ROUTE --> HOME
   HOME --> SESSION
   SESSION --> PAINT
   NAV -->|http(s)| FETCH
@@ -213,7 +219,9 @@ Fetched text
 |---|---|---|
 | `index.html` | 布局、主题变量、手机安全区/键盘 | 业务逻辑 |
 | `browser.js` | HTTP(S) 安全、取页、解析、纯文本 | 命令、历史、搜索策略 |
-| `usc.js` | 命令、搜索抽取/去噪、历史、书签、渲染交互 | 原始 HTML 解析细节 |
+| `library.js` | usc.local 路由与产品页 markdown、会话 | 取页、SERP、渲染 |
+| `search.js` | 引擎、SERP 抽取/去噪、搜索结果文档 | 历史栈、paint |
+| `usc.js` | 命令、`go` 内核、历史、书签存储、渲染交互 | 原始 HTML 解析、SERP 细节 |
 
 ```bash
 node usc.test.js
@@ -288,12 +296,13 @@ index.html     Text UI, light/dark theme, mobile chrome
 favicon.svg    Icon
 manifest.json  Installable app shell
 browser.js     Fetch, Jina, HTML/Markdown → document model
-library.js     Local knowledge: recents, continue, bookmarks, start/settings pages
-usc.js         Commands, search pipeline, history stack, theme, paint
+library.js     usc.local routing, recents, continue, product-page markdown
+search.js      Engines, SERP extract/denoise, search-hub documents
+usc.js         Commands, go() kernel, history stack, theme, paint
 usc.test.js    Dependency-free tests
 ```
 
-Product surfaces (home, settings, history, bookmarks, help, about) are **markdown documents on usc.local**, so they use the same `go` / click / `paint` path as articles. Host `usc.local` is **never fetched from the network**. Opening a remote page immediately replaces the current document with a loading page, then with article text or an error — clicks do not leave you staring at the search list.
+Product surfaces (home, settings, history, bookmarks, help, about) are **markdown documents on usc.local**. Every open goes through `go(url)`: `Library.surface(url)` for app pages, `search.js` for the search hub, otherwise fetch. Host `usc.local` is **never fetched from the network**. Opening a remote page immediately replaces the current document with a loading page, then with article text or an error — clicks do not leave you staring at the search list.
 
 #### Overview
 
@@ -306,14 +315,18 @@ flowchart TB
 
   subgraph APP["usc.js"]
     PARSE["parseLine"]
-    SEARCH["search pipeline"]
-    NAV["go + history"]
+    NAV["go · Library.surface"]
     PAINT["paint"]
   end
 
+  subgraph SEARCHMOD["search.js"]
+    SEARCH["engines / SERP / hub"]
+  end
+
   subgraph LIB["library.js"]
-    HOME["home / settings / history / bookmarks"]
+    HOME["home / settings / history / help"]
     SESSION["recents + last"]
+    ROUTE["surface(url)"]
   end
 
   subgraph CORE["browser.js"]
@@ -327,7 +340,8 @@ flowchart TB
   PARSE -->|search| SEARCH
   PARSE -->|follow / local page| NAV
   SEARCH --> PAINT
-  NAV -->|usc.local| HOME
+  NAV -->|usc.local| ROUTE
+  ROUTE --> HOME
   HOME --> SESSION
   SESSION --> PAINT
   NAV -->|http(s)| FETCH
