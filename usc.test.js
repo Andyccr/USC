@@ -317,6 +317,8 @@ assert.strictEqual(
 );
 assert.strictEqual(USC.isInternalSearchUrl("https://usc.local/search?q=hi"), true);
 assert.strictEqual(USC.internalSearchQuery("https://usc.local/search?q=hi"), "hi");
+assert.strictEqual(USC.Search.extractSearchResults, USC.extractSearchResults);
+assert.strictEqual(USC.Search.buildSearchDocument, USC.buildSearchDocument);
 assert.strictEqual(USC.isInternalSearchUrl("https://usc.local/"), false);
 assert.strictEqual(USC.isInternalSearchUrl("https://www.google.com/search?q=hi"), false);
 assert.strictEqual(USC.isSearchEngineUrl("https://www.google.com/search?q=hi"), true);
@@ -449,6 +451,34 @@ assert.strictEqual(Library.isAppUrl("https://usc.local/settings"), true);
 assert.strictEqual(Library.isAppUrl("https://usc.local/search?q=hi"), false);
 assert.strictEqual(Library.isSurfaceUrl("https://usc.local/"), true);
 assert.strictEqual(Library.isSurfaceUrl("https://en.wikipedia.org/"), false);
+assert.strictEqual(Library.surface("https://usc.local/"), "home");
+assert.strictEqual(Library.surface("https://usc.local/settings"), "settings");
+assert.strictEqual(Library.surface("https://usc.local/search?q=hi"), "search");
+assert.strictEqual(Library.surface("https://usc.local/help"), "help");
+assert.strictEqual(Library.surface("https://usc.local/about"), "about");
+assert.strictEqual(Library.surface("https://usc.local/unknown"), "local");
+assert.strictEqual(Library.surface("https://en.wikipedia.org/wiki/Hello"), "");
+assert.strictEqual(Library.searchUrl("hello world"), "https://usc.local/search?q=hello%20world");
+assert.strictEqual(Library.searchQuery("https://usc.local/search?q=hi"), "hi");
+assert.strictEqual(Library.isSearchUrl("https://usc.local/search?q=hi"), true);
+
+var helpDoc = Browser.markdownToDocument(Library.helpMarkdown(), Library.HELP);
+assert.ok(helpDoc.links.some(function (link) {
+  return link.url === Library.HOME;
+}));
+assert.ok(helpDoc.links.some(function (link) {
+  return link.url === Library.SETTINGS;
+}));
+var aboutDoc = Browser.markdownToDocument(Library.aboutMarkdown(), Library.ABOUT);
+assert.ok(aboutDoc.links.some(function (link) {
+  return link.url === Library.HELP;
+}));
+var imageDoc = Browser.markdownToDocument(
+  Library.imageMarkdown("https://ex.com/a.png"),
+  "https://ex.com/a.png"
+);
+assert.strictEqual(imageDoc.images.length, 1);
+assert.strictEqual(imageDoc.images[0].url, "https://ex.com/a.png");
 assert.deepStrictEqual(Library.parseSetUrl("https://usc.local/set?k=theme&v=dark"), {
   key: "theme",
   value: "dark"

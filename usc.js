@@ -1,22 +1,22 @@
 (function (root, factory) {
   var Browser = root.USCBrowser;
   var Library = root.USCLibrary;
+  var Search = root.USCSearch;
   if (!Browser && typeof require === "function") Browser = require("./browser.js");
   if (!Library && typeof require === "function") Library = require("./library.js");
-  var api = factory(Browser, Library);
+  if (!Search && typeof require === "function") Search = require("./search.js");
+  var api = factory(Browser, Library, Search);
   root.USC = api;
   if (typeof module === "object" && module.exports) module.exports = api;
   if (typeof document !== "undefined") api.mount(document);
-})(typeof globalThis !== "undefined" ? globalThis : this, function (Browser, Library) {
-  var ALL = ["google", "bing", "baidu"];
-  var SUGGEST_LIMIT = 8;
-  var JSONP_TIMEOUT = 5000;
+})(typeof globalThis !== "undefined" ? globalThis : this, function (Browser, Library, Search) {
+  var ALL = Search.ALL;
+  var ENGINES = Search.ENGINES;
   var MAX_STACK = 40;
   var MAX_CACHE = 20;
   var MAX_RAW = 2000000;
   var LOAD_TIMEOUT = 15000;
   var SEARCH_TIMEOUT = 22000;
-  var ENGINE_TIMEOUT = 9000;
   var BOOKMARK_KEY = "usc.bookmarks";
   var IMAGE_KEY = "usc.images";
   var PROXY_KEY = "usc.proxy";
@@ -59,135 +59,6 @@
     ":help"
   ];
 
-  var ENGINES = {
-    google: {
-      aliases: ["g", "google"],
-      searchUrl: function (q) {
-        return "https://www.google.com/search?q=" + encodeURIComponent(q) + "&hl=zh-CN";
-      },
-      suggestUrl: function (q, cb) {
-        return (
-          "https://suggestqueries.google.com/complete/search?client=chrome&hl=zh-CN&q=" +
-          encodeURIComponent(q) +
-          "&callback=" +
-          encodeURIComponent(cb)
-        );
-      },
-      parseSuggest: function (data) {
-        return listFrom(data && data[1]);
-      }
-    },
-    bing: {
-      aliases: ["b", "bing"],
-      searchUrl: function (q) {
-        return "https://www.bing.com/search?q=" + encodeURIComponent(q);
-      },
-      suggestUrl: function (q, cb) {
-        return (
-          "https://api.bing.com/osjson.aspx?query=" +
-          encodeURIComponent(q) +
-          "&JsonType=callback&JsonCallback=" +
-          encodeURIComponent(cb)
-        );
-      },
-      parseSuggest: function (data) {
-        return listFrom(data && data[1]);
-      }
-    },
-    baidu: {
-      aliases: ["d", "bd", "baidu"],
-      searchUrl: function (q) {
-        return "https://www.baidu.com/s?wd=" + encodeURIComponent(q);
-      },
-      suggestUrl: function (q, cb) {
-        return (
-          "https://suggestion.baidu.com/su?ie=utf-8&oe=utf-8&p=3&wd=" +
-          encodeURIComponent(q) +
-          "&cb=" +
-          encodeURIComponent(cb)
-        );
-      },
-      parseSuggest: function (data) {
-        return listFrom(data && data.s);
-      }
-    },
-    duckduckgo: {
-      aliases: ["ddg", "duck"],
-      searchUrl: function (q) {
-        return "https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(q);
-      },
-      suggestUrl: function () {
-        return "";
-      },
-      parseSuggest: function () {
-        return [];
-      }
-    }
-  };
-
-  var RESULT_LIMIT = 24;
-  var NOISE_TITLES = {
-    "skip to content": 1,
-    "accessibility feedback": 1,
-    rewards: 1,
-    images: 1,
-    videos: 1,
-    maps: 1,
-    news: 1,
-    shopping: 1,
-    flights: 1,
-    more: 1,
-    tools: 1,
-    all: 1,
-    search: 1,
-    "any time": 1,
-    "open links in new tab": 1,
-    "查看更多": 1,
-    "查看更多相关信息": 1,
-    hao123: 1
-  };
-
-  var HELP =
-    "type to search\n" +
-    "url to open\n" +
-    "number to follow a link\n" +
-    "\n" +
-    "back     home     help\n" +
-    "i 1      load image link 1\n" +
-    "i on     always load images\n" +
-    "proxy     auto / on / off\n" +
-    "theme     tap / Alt+T · dark light auto\n" +
-    "settings  appearance · proxy · font\n" +
-    "resume    reopen last page\n" +
-    "star      bookmark / unbookmark\n" +
-    "history   this session\n" +
-    "font +    adjust text size\n" +
-    "copy      copy current URL\n" +
-    "share     share current page\n" +
-    "g hello  google only\n" +
-    "s back   search a command word\n" +
-    "real     open outside\n" +
-    "about     product info\n" +
-    ":cmd     any command\n" +
-    "\n" +
-    "pages stay as text · images stay as links\n";
-
-  var ABOUT =
-    "USC  plain-text browser\n" +
-    "search · read · stay in-page\n" +
-    "\n" +
-    "theme    dark / light / auto\n" +
-    "         tap the label · Alt+T · theme\n" +
-    "settings  theme · proxy · images · font\n" +
-    "resume    last page after refresh\n" +
-    "star      save this page\n" +
-    "history   this session\n" +
-    "proxy    auto (Jina when blocked)\n" +
-    "images   links until you load them\n" +
-    "\n" +
-    "no backend · no index · no account\n" +
-    "help     commands\n";
-
   function nextTheme(mode) {
     if (mode === "dark") return "light";
     if (mode === "light") return "system";
@@ -196,16 +67,6 @@
 
   function themeLabel(mode) {
     return mode === "system" ? "auto" : mode === "light" ? "light" : "dark";
-  }
-
-  function listFrom(value) {
-    if (!Array.isArray(value)) return [];
-    var out = [];
-    for (var i = 0; i < value.length && out.length < SUGGEST_LIMIT; i++) {
-      var item = value[i];
-      if (typeof item === "string" && item) out.push(item);
-    }
-    return out;
   }
 
   function parseLine(line) {
@@ -306,79 +167,6 @@
     return { type: "search", engines: ALL.slice(), query: text };
   }
 
-  var jsonpSeq = 0;
-
-  function jsonp(urlForCallback, timeoutMs) {
-    timeoutMs = timeoutMs || JSONP_TIMEOUT;
-    return new Promise(function (resolve, reject) {
-      if (typeof document === "undefined") {
-        reject(new Error("no document"));
-        return;
-      }
-      var cb = "_usc" + Date.now() + "_" + jsonpSeq++;
-      var settled = false;
-      var script = document.createElement("script");
-      var timer = setTimeout(function () {
-        finish(new Error("timeout"));
-      }, timeoutMs);
-
-      function finish(err, data) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          delete window[cb];
-        } catch (e) {
-          window[cb] = undefined;
-        }
-        if (script.parentNode) script.parentNode.removeChild(script);
-        if (err) reject(err);
-        else resolve(data);
-      }
-
-      window[cb] = function (data) {
-        finish(null, data);
-      };
-      script.onerror = function () {
-        finish(new Error("blocked"));
-      };
-      script.src = urlForCallback(cb);
-      script.async = true;
-      document.head.appendChild(script);
-    });
-  }
-
-  function suggestOne(name, query) {
-    var engine = ENGINES[name];
-    if (!engine || !engine.suggestUrl(query, "cb")) {
-      return Promise.resolve({
-        name: name,
-        suggestions: [],
-        url: engine ? engine.searchUrl(query) : ""
-      });
-    }
-    return jsonp(function (cb) {
-      return engine.suggestUrl(query, cb);
-    }).then(function (data) {
-      return { name: name, suggestions: engine.parseSuggest(data), url: engine.searchUrl(query) };
-    }).catch(function (err) {
-      return {
-        name: name,
-        suggestions: [],
-        url: engine.searchUrl(query),
-        error: err && err.message ? err.message : "failed"
-      };
-    });
-  }
-
-  function suggestMany(engines, query) {
-    return Promise.all(
-      engines.map(function (name) {
-        return suggestOne(name, query);
-      })
-    );
-  }
-
   function openExternal(url) {
     var a = document.createElement("a");
     a.href = url;
@@ -389,456 +177,10 @@
     document.body.removeChild(a);
   }
 
-  function engineHostKind(host) {
-    host = String(host || "")
-      .replace(/^www\./, "")
-      .toLowerCase();
-    if (/(^|\.)google\./i.test(host)) return "google";
-    if (/(^|\.)bing\./i.test(host)) return "bing";
-    if (/(^|\.)baidu\./i.test(host)) return "baidu";
-    if (/(^|\.)duckduckgo\./i.test(host)) return "duckduckgo";
-    return "";
-  }
-
-  function isSearchEngineUrl(url) {
-    try {
-      return !!engineHostKind(new URL(url).hostname);
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function decodeBase64Url(value) {
-    var raw = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
-    var pad = (4 - (raw.length % 4)) % 4;
-    while (pad--) raw += "=";
-    try {
-      if (typeof atob === "function") return atob(raw);
-      if (typeof Buffer !== "undefined") return Buffer.from(raw, "base64").toString("utf8");
-    } catch (e) {}
-    return "";
-  }
-
-  function unwrapRedirectUrl(url) {
-    try {
-      var u = new URL(url);
-      var host = u.hostname.replace(/^www\./, "").toLowerCase();
-      if (host.indexOf("duckduckgo.com") >= 0) {
-        var uddg = u.searchParams.get("uddg");
-        if (uddg) return uddg;
-      }
-      if (host.indexOf("bing.com") >= 0) {
-        var bingU = u.searchParams.get("u");
-        if (bingU && bingU.indexOf("a1") === 0) {
-          var decoded = decodeBase64Url(bingU.slice(2));
-          if (/^https?:\/\//i.test(decoded)) return decoded;
-        }
-      }
-      if (host.indexOf("google.") >= 0 || /\.google\./i.test(host)) {
-        var gq = u.searchParams.get("q") || u.searchParams.get("url");
-        if (gq && /^https?:\/\//i.test(gq)) return gq;
-      }
-      return u.href;
-    } catch (e) {
-      return url;
-    }
-  }
-
-  function engineQueryFromUrl(url) {
-    try {
-      var u = new URL(url);
-      var kind = engineHostKind(u.hostname);
-      if (!kind) return "";
-      var path = u.pathname || "";
-      if (kind === "baidu") {
-        if (path.indexOf("/s") !== 0 && path.indexOf("/baidu") !== 0) return "";
-        return u.searchParams.get("wd") || u.searchParams.get("word") || "";
-      }
-      if (kind === "duckduckgo") {
-        if (path.indexOf("/l/") === 0) return "";
-        return u.searchParams.get("q") || "";
-      }
-      if (path.indexOf("/search") !== 0 && path !== "/" && path !== "/url") return "";
-      if (path === "/url") return "";
-      return u.searchParams.get("q") || u.searchParams.get("query") || "";
-    } catch (e) {
-      return "";
-    }
-  }
-
-  function isSearchEngineResultPage(url) {
-    return !!engineQueryFromUrl(url);
-  }
-
-  function isSearchEngineChromeUrl(url) {
-    try {
-      var u = new URL(url);
-      var kind = engineHostKind(u.hostname);
-      if (!kind) return false;
-      if (engineQueryFromUrl(url)) return true;
-      var path = u.pathname || "";
-      if (kind === "bing" && path.indexOf("/ck/") === 0) return true;
-      if (kind === "duckduckgo" && path.indexOf("/l/") === 0) return false;
-      if (kind === "baidu" && (path.indexOf("/link") === 0 || path.indexOf("/baidu.php") === 0)) {
-        return false;
-      }
-      if (kind === "google" && path === "/url") return false;
-      return (
-        path === "/" ||
-        path === "/webhp" ||
-        path.indexOf("/img") === 0 ||
-        path.indexOf("/maps") === 0 ||
-        path.indexOf("/videos") === 0 ||
-        path.indexOf("/news") === 0
-      );
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function isImageUrl(url) {
-    try {
-      var u = new URL(url);
-      var host = u.hostname.replace(/^www\./, "").toLowerCase();
-      var path = u.pathname.toLowerCase();
-      if (/\.(png|jpe?g|gif|webp|svg|ico|bmp|avif)(\?|$)/i.test(path)) return true;
-      if (host.indexOf("th.bing.com") >= 0) return true;
-      if (host.indexOf("tse") === 0 && host.indexOf("bing.net") >= 0) return true;
-      if (host.indexOf("gstatic.com") >= 0) return true;
-      if (host.indexOf("googleusercontent.com") >= 0 && path.indexOf("/images") >= 0) return true;
-      if (host.indexOf("bdstatic.com") >= 0) return true;
-      if (host.indexOf("duckduckgo.com") >= 0 && (path.indexOf("/i/") >= 0 || path.indexOf("/iu/") >= 0)) {
-        return true;
-      }
-      if (host.indexOf("external-content.duckduckgo.com") >= 0) return true;
-      if (path.indexOf("/y.js") >= 0) return true;
-      return false;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function stripMarkdownImages(line) {
-    return String(line || "")
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  function cleanResultTitle(title) {
-    return String(title || "")
-      .replace(/\*+/g, "")
-      .replace(/!\[[^\]]*\]/g, "")
-      .replace(/\s+/g, " ")
-      .replace(/^#+\s*/, "")
-      .trim();
-  }
-
-  function resultKey(url) {
-    try {
-      var u = new URL(url);
-      return (u.hostname.replace(/^www\./, "") + u.pathname).toLowerCase().replace(/\/$/, "");
-    } catch (e) {
-      return String(url || "").toLowerCase();
-    }
-  }
-
-  function isUsefulResult(title, url) {
-    title = cleanResultTitle(title);
-    if (!title || title.length < 2) return false;
-    if (NOISE_TITLES[title.toLowerCase()]) return false;
-    if (/^!\[/.test(title) || /^image\s*\d*/i.test(title)) return false;
-    if (/^https?:\/\//i.test(title) && title === url) return false;
-    if (isImageUrl(url)) return false;
-    try {
-      var u = new URL(url);
-      if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-      if (u.hostname === "usc.local") return false;
-      var kind = engineHostKind(u.hostname);
-      if (kind && isSearchEngineResultPage(url)) return false;
-      if (kind === "bing" && (u.pathname.indexOf("/ck/") === 0 || u.pathname === "/")) return false;
-      if (kind === "google" && (u.pathname === "/" || u.pathname === "/webhp")) return false;
-      if (kind === "baidu" && (u.pathname.indexOf("/baidu.php") === 0 || u.hostname.indexOf("hao123") >= 0)) {
-        return false;
-      }
-      if (kind === "duckduckgo" && u.pathname.indexOf("/l/") !== 0 && !u.searchParams.get("uddg")) {
-        if (u.pathname === "/" || u.pathname.indexOf("/lite") === 0 || u.pathname.indexOf("/html") === 0) {
-          return false;
-        }
-      }
-      if (u.pathname.indexOf("/y.js") >= 0) return false;
-      if (u.hostname.indexOf("bing.com") >= 0 && u.pathname.indexOf("/th") === 0) return false;
-      if (Browser.isNoiseWikiUrl && Browser.isNoiseWikiUrl(url)) return false;
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function extractSearchResults(text, engine) {
-    var raw = String(text || "").replace(/\r\n/g, "\n");
-    var idx = raw.indexOf("Markdown Content:");
-    var md = idx >= 0 ? raw.slice(idx + "Markdown Content:".length) : raw;
-    var lines = md.split("\n");
-    var results = [];
-    var seen = {};
-
-    function pushResult(title, href, snippet) {
-      var url = unwrapRedirectUrl(href);
-      title = cleanResultTitle(title);
-      // Nested image-markdown often leaves junk titles like "wikipedia.org https://…"
-      title = title
-        .replace(/\s*https?:\/\/\S+/g, "")
-        .replace(/\s*[›>].*$/, "")
-        .replace(/\s+/g, " ")
-        .trim();
-      snippet = String(snippet || "")
-        .replace(/\*+/g, "")
-        .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (!isUsefulResult(title, url)) return;
-      var key = resultKey(url);
-      if (seen[key]) return;
-      seen[key] = 1;
-      results.push({
-        title: title,
-        url: url,
-        snippet: snippet.slice(0, 220),
-        engine: engine || ""
-      });
-    }
-
-    function snippetAfter(start) {
-      for (var j = start + 1; j < Math.min(start + 5, lines.length); j++) {
-        var next = stripMarkdownImages(lines[j]);
-        if (!next) continue;
-        if (/^#{1,6}\s*\[/.test(next) || /^\d+\.\s*\[/.test(next)) break;
-        if (/^\[[^\]]{1,40}\]\(https?:/.test(next) && next.length < 90) continue;
-        next = next.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
-        if (next) return next;
-      }
-      return "";
-    }
-
-    // Pass 1: heading links are the cleanest SERP signal (Bing/Google/Baidu).
-    for (var i = 0; i < lines.length && results.length < RESULT_LIMIT; i++) {
-      var headingLine = stripMarkdownImages(lines[i]);
-      if (!/^#{1,6}\s*\[/.test(headingLine)) continue;
-      var heading = Browser.firstMarkdownLink(headingLine.replace(/^#{1,6}\s*/, ""));
-      if (!heading || !/^https?:/i.test(heading.url)) continue;
-      pushResult(heading.text, heading.url, snippetAfter(i));
-    }
-
-    // Pass 2: numbered / plain links after stripping nested icons.
-    if (results.length < 3) {
-      for (var n = 0; n < lines.length && results.length < RESULT_LIMIT; n++) {
-        var line = stripMarkdownImages(lines[n]);
-        if (!line) continue;
-        var rest = line.replace(/^\d+\.\s*/, "");
-        var hit = Browser.firstMarkdownLink(rest);
-        if (!hit || !/^https?:/i.test(hit.url)) continue;
-        pushResult(hit.text, hit.url, snippetAfter(n));
-      }
-    }
-
-    // Pass 3: last-resort scan, still image-filtered.
-    if (!results.length) {
-      var cleaned = stripMarkdownImages(md);
-      var pos = 0;
-      while (results.length < RESULT_LIMIT) {
-        var chunk = cleaned.slice(pos);
-        var found = Browser.firstMarkdownLink(chunk);
-        if (!found) break;
-        pos += found.end;
-        pushResult(found.text, found.url, "");
-      }
-    }
-    return results;
-  }
-
-  function withTimeout(promise, ms, signal) {
-    return new Promise(function (resolve, reject) {
-      var done = false;
-      var timer = setTimeout(function () {
-        if (done) return;
-        done = true;
-        var err = new Error("timeout");
-        err.name = "TimeoutError";
-        reject(err);
-      }, ms);
-      function finish(fn, value) {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        fn(value);
-      }
-      if (signal) {
-        if (signal.aborted) {
-          finish(reject, Object.assign(new Error("aborted"), { name: "AbortError" }));
-          return;
-        }
-        signal.addEventListener(
-          "abort",
-          function () {
-            finish(reject, Object.assign(new Error("aborted"), { name: "AbortError" }));
-          },
-          { once: true }
-        );
-      }
-      promise.then(
-        function (value) {
-          finish(resolve, value);
-        },
-        function (err) {
-          finish(reject, err);
-        }
-      );
-    });
-  }
-
-  function fetchEngineResults(name, query, signal) {
-    var engine = ENGINES[name];
-    if (!engine) {
-      return Promise.resolve({ name: name, results: [], error: "unknown engine" });
-    }
-    return withTimeout(
-      Browser.fetchPage(engine.searchUrl(query), {
-        signal: signal,
-        proxy: true,
-        forceProxy: true,
-        format: "markdown"
-      }),
-      ENGINE_TIMEOUT,
-      signal
-    )
-      .then(function (fetched) {
-        return {
-          name: name,
-          results: extractSearchResults(fetched.text, name),
-          via: fetched.via
-        };
-      })
-      .catch(function (err) {
-        if (err && err.name === "AbortError") throw err;
-        return {
-          name: name,
-          results: [],
-          error: err && err.message ? err.message : "error"
-        };
-      });
-  }
-
-  function resultWeight(item) {
-    try {
-      var host = new URL(item.url).hostname.replace(/^www\./, "").toLowerCase();
-      if (/wikipedia\.org|wiktionary\.org|github\.com|developer\.mozilla\.org/.test(host)) return 0;
-      if (/youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com/.test(host)) return 2;
-    } catch (e) {}
-    return 1;
-  }
-
-  function mergeSearchResults(batches) {
-    var seen = {};
-    var out = [];
-    for (var i = 0; i < batches.length; i++) {
-      var list = batches[i].results || [];
-      for (var j = 0; j < list.length; j++) {
-        var item = list[j];
-        var key = resultKey(item.url);
-        if (seen[key]) continue;
-        seen[key] = 1;
-        out.push(item);
-        if (out.length >= RESULT_LIMIT) break;
-      }
-      if (out.length >= RESULT_LIMIT) break;
-    }
-    out.sort(function (a, b) {
-      return resultWeight(a) - resultWeight(b);
-    });
-    return out;
-  }
-
-  function mdHref(url) {
-    return "<" + String(url || "").replace(/[<>]/g, "") + ">";
-  }
-
-  function buildSearchDocument(query, results, meta) {
-    meta = meta || {};
-    var hubUrl = internalSearchUrl(query);
-    var md =
-      "Title: " +
-      query +
-      "\nURL Source: " +
-      hubUrl +
-      "\n\nMarkdown Content:\n" +
-      query +
-      "\n\n";
-    if (meta.status) md += meta.status + "\n\n";
-    if (!results.length && !meta.status) {
-      md += "no results\n";
-    }
-    for (var i = 0; i < results.length; i++) {
-      var item = results[i];
-      var label = item.title.replace(/[\[\]]/g, "");
-      var host = "";
-      try {
-        host = new URL(item.url).hostname.replace(/^www\./, "");
-      } catch (e) {}
-      if (host) label += " · " + host;
-      md += "[" + label + "](" + mdHref(item.url) + ")\n";
-      if (item.snippet) {
-        md += item.snippet.replace(/\[/g, "(").replace(/\]/g, ")") + "\n";
-      }
-      md += "\n";
-    }
-    if (meta.related && meta.related.length) {
-      md += "related\n";
-      for (var r = 0; r < meta.related.length; r++) {
-        md +=
-          "[" +
-          meta.related[r].replace(/[\[\]]/g, "") +
-          "](" +
-          mdHref(internalSearchUrl(meta.related[r])) +
-          ")\n";
-      }
-    }
-    if (meta.footer) md += "\n" + meta.footer + "\n";
-    var documentModel = Browser.markdownToDocument(md, hubUrl);
-    documentModel.via = meta.via || "search";
-    documentModel.searchQuery = query;
-    documentModel.searchEngines = meta.engines || ALL.slice();
-    return documentModel;
-  }
-
   function eventElement(target) {
     if (!target) return null;
     if (target.nodeType === 1) return target;
     return target.parentElement || null;
-  }
-
-  function isInternalSearchUrl(url) {
-    try {
-      var u = new URL(url);
-      return u.hostname === "usc.local" && u.pathname === "/search";
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function internalSearchQuery(url) {
-    try {
-      var u = new URL(url);
-      if (u.hostname !== "usc.local") return "";
-      if (u.pathname === "/search") return u.searchParams.get("q") || "";
-      return "";
-    } catch (e) {
-      return "";
-    }
-  }
-
-  function internalSearchUrl(query) {
-    return "https://usc.local/search?q=" + encodeURIComponent(query);
   }
 
   function storageGet(key, fallback) {
@@ -900,7 +242,7 @@
     var promptLabel = form && form.querySelector("label");
     var themeBtn = doc.getElementById("theme");
     if (!page || !status || !msg || !form || !input) return;
-    if (!Browser || !Library) return;
+    if (!Browser || !Library || !Search) return;
 
     var cmdHistory = [];
     var cmdPos = -1;
@@ -972,25 +314,11 @@
     }
 
     function helpDocument() {
-      return Browser.markdownToDocument(
-        Library.textMarkdown(
-          "help",
-          Library.HELP,
-          "help\n\n" + HELP + "\n[settings](" + Library.mdHref(Library.SETTINGS) + ")\n[home](" + Library.mdHref(Library.HOME) + ")\n"
-        ),
-        Library.HELP
-      );
+      return Browser.markdownToDocument(Library.helpMarkdown(), Library.HELP);
     }
 
     function aboutDocument() {
-      return Browser.markdownToDocument(
-        Library.textMarkdown(
-          "about",
-          Library.ABOUT,
-          ABOUT + "\n[settings](" + Library.mdHref(Library.SETTINGS) + ")\n[help](" + Library.mdHref(Library.HELP) + ")\n[home](" + Library.mdHref(Library.HOME) + ")\n"
-        ),
-        Library.ABOUT
-      );
+      return Browser.markdownToDocument(Library.aboutMarkdown(), Library.ABOUT);
     }
 
     function loadingDocument(url, title) {
@@ -1025,41 +353,20 @@
       return false;
     }
 
+    function localDocument(kind) {
+      if (kind === "settings") return settingsDocument();
+      if (kind === "history") return historyDocument();
+      if (kind === "bookmarks") return bookmarksDocument();
+      if (kind === "help") return helpDocument();
+      if (kind === "about") return aboutDocument();
+      return homeDocument();
+    }
+
     function applyLocalUrl(abs, nav) {
-      if (Library.isHomeUrl(abs) || abs === "https://usc.local") {
-        cancelPending();
-        setCurrent(homeDocument(), nav || "push");
-        return true;
-      }
-      if (Library.isSettingsUrl(abs)) {
-        cancelPending();
-        setCurrent(settingsDocument(), nav || "push");
-        return true;
-      }
-      if (Library.isHistoryUrl(abs)) {
-        cancelPending();
-        setCurrent(historyDocument(), nav || "push");
-        return true;
-      }
-      if (Library.isBookmarksUrl(abs)) {
-        cancelPending();
-        setCurrent(bookmarksDocument(), nav || "push");
-        return true;
-      }
-      if (Library.isHelpUrl(abs)) {
-        cancelPending();
-        setCurrent(helpDocument(), nav || "push");
-        return true;
-      }
-      if (Library.isAboutUrl(abs)) {
-        cancelPending();
-        setCurrent(aboutDocument(), nav || "push");
-        return true;
-      }
-      if (Library.isResumeUrl(abs)) {
-        return resumeLast();
-      }
-      if (Library.isSetUrl(abs)) {
+      var kind = Library.surface(abs);
+      if (!kind || kind === "search") return false;
+      if (kind === "resume") return resumeLast();
+      if (kind === "set") {
         var change = Library.parseSetUrl(abs);
         if (!change) return true;
         if (change.key === "theme") {
@@ -1091,7 +398,14 @@
         );
         return true;
       }
-      return false;
+      cancelPending();
+      setCurrent(localDocument(kind), nav || "push");
+      return true;
+    }
+
+    function refreshSurface() {
+      if (!current || !Library.isSurfaceUrl(current.url)) return;
+      applyLocalUrl(current.url, "replace");
     }
 
     function setStatus(text) {
@@ -1245,7 +559,7 @@
         return;
       }
       var bits = [];
-      if (current.url && String(current.url).indexOf("usc.local/search") >= 0) {
+      if (Library.isSearchUrl(current.url)) {
         bits.push("search");
         if (current.links && current.links.length) bits.push(String(current.links.length));
       } else {
@@ -1322,8 +636,7 @@
             page.appendChild(mark);
             sawMark = true;
           } else if (
-            (Library.isSurfaceUrl(documentModel.url) ||
-              (documentModel.url && String(documentModel.url).indexOf("usc.local/search") >= 0)) &&
+            (Library.isSurfaceUrl(documentModel.url) || Library.isSearchUrl(documentModel.url)) &&
             Library.isSectionLabel(tok.v)
           ) {
             var sec = doc.createElement("span");
@@ -1388,18 +701,13 @@
       findMatches = 0;
       var home = current && Library.isHomeUrl(current.url) && view === "page";
       var libraryPage = current && Library.isSurfaceUrl(current.url) && !home && view === "page";
-      var searchPage =
-        current && current.url && String(current.url).indexOf("usc.local/search") >= 0 && view === "page";
+      var searchPage = current && Library.isSearchUrl(current.url) && view === "page";
       if (doc.body && doc.body.classList) {
         doc.body.classList.toggle("home", !!home);
         doc.body.classList.toggle("library", !!libraryPage);
         doc.body.classList.toggle("search-results", !!searchPage);
       }
-      if (view === "help") {
-        paintTextView(HELP);
-      } else if (view === "about") {
-        paintTextView(ABOUT);
-      } else if (!current) {
+      if (!current) {
         paintTextView("");
       } else if (view === "links") {
         paintTextView(
@@ -1490,66 +798,49 @@
         abs = Browser.normalizeUrl(rawUrl, current && current.url);
       }
       var stackNav = nav || "push";
+      var kind = Library.surface(abs);
 
-      if (Library.isLocalHost(abs)) {
-        if (isInternalSearchUrl(abs)) {
-          var internalQuery = internalSearchQuery(abs);
-          if (internalQuery) {
-            showSearchResults(internalQuery);
-            return;
-          }
-          cancelPending();
-          setCurrent(homeDocument(), stackNav);
+      if (kind === "search") {
+        var internalQuery = Library.searchQuery(abs);
+        if (internalQuery) {
+          showSearchResults(internalQuery);
           return;
         }
-        if (applyLocalUrl(abs, stackNav)) return;
-        cancelPending();
-        setCurrent(homeDocument(), stackNav);
+        applyLocalUrl(Library.HOME, stackNav);
+        return;
+      }
+      if (kind) {
+        applyLocalUrl(abs, stackNav);
         return;
       }
 
-      if (applyLocalUrl(abs, stackNav)) return;
-
-      var engineQuery = engineQueryFromUrl(abs);
+      var engineQuery = Search.engineQueryFromUrl(abs);
       if (engineQuery) {
-        var kind = engineHostKind(new URL(abs).hostname);
-        showSearchResults(engineQuery, kind ? [kind] : ALL.slice());
+        var engineKind = Search.engineHostKind(new URL(abs).hostname);
+        showSearchResults(engineQuery, engineKind ? [engineKind] : ALL.slice());
         return;
       }
-      var unwrapped = unwrapRedirectUrl(abs);
-      if (unwrapped && unwrapped !== abs) {
-        abs = unwrapped;
-      }
+      var unwrapped = Search.unwrapRedirectUrl(abs);
+      if (unwrapped && unwrapped !== abs) abs = unwrapped;
       if (!Browser.isSafeHttpUrl(abs)) {
         printMsg("blocked url", "err");
         return;
       }
-      if (isSearchEngineChromeUrl(abs)) {
+      if (Search.isSearchEngineChromeUrl(abs)) {
         printMsg("search engine UI skipped · stay in USC", "err");
         return;
       }
-      if (isImageUrl(abs)) {
+      if (Search.isImageUrl(abs)) {
         cancelPending();
-        var imageDoc = Browser.markdownToDocument(
-          "Title: image\nURL Source: " +
-            abs +
-            "\n\nMarkdown Content:\nimage\n\n![image](" +
-            abs +
-            ")\n\n" +
-            abs +
-            "\n\ni 1  load this image\n",
-          abs
-        );
+        var imageDoc = Browser.markdownToDocument(Library.imageMarkdown(abs), abs);
         imageDoc.via = "image-link";
         applyImageMode(imageDoc);
         setCurrent(imageDoc, stackNav);
         return;
       }
 
-      var fromSearch =
-        (current && current.url && String(current.url).indexOf("usc.local/search") >= 0) ||
-        isSearchEngineUrl(abs);
-      var allowProxy = proxyMode !== "off" || isSearchEngineUrl(abs);
+      var fromSearch = Library.isSearchUrl(current && current.url) || Search.isSearchEngineUrl(abs);
+      var allowProxy = proxyMode !== "off" || Search.isSearchEngineUrl(abs);
       var hit = cache[abs];
 
       cancelPending();
@@ -1599,15 +890,8 @@
       req
         .then(function (fetched) {
           if (ticket !== going) return;
-          if (fetched.via === "direct-image" || isImageUrl(fetched.url || abs)) {
-            var onlyImage = Browser.markdownToDocument(
-              "Title: image\nURL Source: " +
-                (fetched.url || abs) +
-                "\n\nMarkdown Content:\nimage\n\n![image](" +
-                (fetched.url || abs) +
-                ")\n",
-              fetched.url || abs
-            );
+          if (fetched.via === "direct-image" || Search.isImageUrl(fetched.url || abs)) {
+            var onlyImage = Browser.markdownToDocument(Library.imageMarkdown(fetched.url || abs), fetched.url || abs);
             onlyImage.via = fetched.via || "image-link";
             finishPage(onlyImage);
             return;
@@ -1688,7 +972,7 @@
         timedOut = true;
         if (controller) controller.abort();
       }, SEARCH_TIMEOUT);
-      var loadingDoc = buildSearchDocument(query, [], {
+      var loadingDoc = Search.buildSearchDocument(query, [], {
         status: "searching…",
         engines: engines
       });
@@ -1705,10 +989,6 @@
       });
       if (!suggestEngines.length) suggestEngines = ALL.slice();
 
-      function stillHere() {
-        return ticket === going && stack[hubPos] && stackPos === hubPos;
-      }
-
       function sourcesOf() {
         var sources = [];
         for (var i = 0; i < batches.length; i++) {
@@ -1720,10 +1000,10 @@
       function paintSearch(statusText, isFinal) {
         if (ticket !== going) return;
         if (stackPos !== hubPos) return;
-        var merged = mergeSearchResults(batches);
+        var merged = Search.mergeSearchResults(batches);
         var sources = sourcesOf();
         var keepScroll = paintedOnce ? page.scrollTop : 0;
-        var documentModel = buildSearchDocument(query, merged, {
+        var documentModel = Search.buildSearchDocument(query, merged, {
           status: statusText || "",
           related: related,
           via: sources.length ? "search:" + sources.join("+") : "search",
@@ -1747,7 +1027,7 @@
         }
       }
 
-      suggestMany(suggestEngines, query)
+      Search.suggestMany(suggestEngines, query)
         .then(function (suggestions) {
           if (ticket !== going) return;
           var seen = {};
@@ -1774,12 +1054,12 @@
       }
 
       fetchList.forEach(function (name) {
-        fetchEngineResults(name, query, controller && controller.signal)
+        Search.fetchEngineResults(name, query, controller && controller.signal)
           .then(function (batch) {
             if (ticket !== going) return;
             batches.push(batch);
             pending -= 1;
-            var merged = mergeSearchResults(batches);
+            var merged = Search.mergeSearchResults(batches);
             if (merged.length) {
               paintSearch(pending ? "searching…" : "", pending === 0);
             } else if (pending === 0) {
@@ -1814,18 +1094,15 @@
 
     function handle(cmd, line) {
       if (cmd.type === "help") {
-        cancelPending();
-        setCurrent(helpDocument(), "push");
+        go(Library.HELP, "push");
         return;
       }
       if (cmd.type === "about") {
-        cancelPending();
-        setCurrent(aboutDocument(), "push");
+        go(Library.ABOUT, "push");
         return;
       }
       if (cmd.type === "settings") {
-        cancelPending();
-        setCurrent(settingsDocument(), "push");
+        go(Library.SETTINGS, "push");
         return;
       }
       if (cmd.type === "resume") {
@@ -1841,8 +1118,7 @@
         return;
       }
       if (cmd.type === "home") {
-        cancelPending();
-        setCurrent(homeDocument(), "push");
+        go(Library.HOME, "push");
         return;
       }
       if (cmd.type === "go") {
@@ -1918,6 +1194,7 @@
           storageSet(IMAGE_KEY, imagesMode);
           if (imagesMode === "on" && current) applyImageMode(current);
           printMsg("images " + imagesMode);
+          refreshSurface();
           paint();
           return;
         }
@@ -1940,6 +1217,7 @@
         } else {
           printMsg("proxy " + proxyMode);
         }
+        refreshSurface();
         return;
       }
       if (cmd.type === "theme") {
@@ -1949,7 +1227,7 @@
         } else {
           printMsg("theme " + themeLabel(themeMode));
         }
-        if (current && current.url === "https://usc.local/" && view === "page") paint();
+        refreshSurface();
         return;
       }
       if (cmd.type === "font") {
@@ -1961,6 +1239,7 @@
         storageSet(FONT_KEY, String(fontSize));
         applyAppearance();
         printMsg("font " + fontSize);
+        refreshSurface();
         return;
       }
       if (cmd.type === "copy") {
@@ -2031,8 +1310,7 @@
         return;
       }
       if (cmd.type === "history") {
-        cancelPending();
-        setCurrent(historyDocument(), "push");
+        go(Library.HISTORY, "push");
         return;
       }
       if (cmd.type === "save") {
@@ -2077,9 +1355,7 @@
             var dropped = marks.splice(markIndex, 1)[0];
             writeBookmarks(marks);
             printMsg("unstarred " + dropped.title);
-            if (Library.isBookmarksUrl(current.url) || Library.isHomeUrl(current.url)) {
-              setCurrent(Library.isHomeUrl(current.url) ? homeDocument() : bookmarksDocument(), "replace");
-            }
+            refreshSurface();
             return;
           }
         }
@@ -2089,8 +1365,7 @@
         return;
       }
       if (cmd.type === "bookmarks") {
-        cancelPending();
-        setCurrent(bookmarksDocument(), "push");
+        go(Library.BOOKMARKS, "push");
         return;
       }
       if (cmd.type === "unbookmark") {
@@ -2102,9 +1377,7 @@
         var removed = bm.splice(cmd.index - 1, 1)[0];
         writeBookmarks(bm);
         printMsg("removed " + removed.title);
-        if (current && (Library.isBookmarksUrl(current.url) || Library.isHomeUrl(current.url))) {
-          setCurrent(Library.isHomeUrl(current.url) ? homeDocument() : bookmarksDocument(), "replace");
-        }
+        refreshSurface();
         return;
       }
       if (cmd.type === "search") {
@@ -2201,7 +1474,7 @@
         return;
       }
       suggestTimer = setTimeout(function () {
-        suggestMany(ALL, q).then(function (results) {
+        Search.suggestMany(ALL, q).then(function (results) {
           if (input.value.replace(/^\s+|\s+$/g, "") !== q) return;
           var seen = {};
           var words = [];
@@ -2294,7 +1567,7 @@
       themeBtn.addEventListener("click", function (event) {
         event.preventDefault();
         setTheme(nextTheme(themeMode), true);
-        if (current && current.url === "https://usc.local/" && view === "page") paint();
+        refreshSurface();
       });
     }
 
@@ -2383,18 +1656,19 @@
     parseLine: parseLine,
     nextTheme: nextTheme,
     themeLabel: themeLabel,
-    suggestMany: suggestMany,
-    isSearchEngineUrl: isSearchEngineUrl,
-    isSearchEngineResultPage: isSearchEngineResultPage,
-    engineQueryFromUrl: engineQueryFromUrl,
-    unwrapRedirectUrl: unwrapRedirectUrl,
-    extractSearchResults: extractSearchResults,
-    mergeSearchResults: mergeSearchResults,
-    buildSearchDocument: buildSearchDocument,
-    isImageUrl: isImageUrl,
-    isInternalSearchUrl: isInternalSearchUrl,
-    internalSearchQuery: internalSearchQuery,
-    internalSearchUrl: internalSearchUrl,
+    suggestMany: Search.suggestMany,
+    isSearchEngineUrl: Search.isSearchEngineUrl,
+    isSearchEngineResultPage: Search.isSearchEngineResultPage,
+    engineQueryFromUrl: Search.engineQueryFromUrl,
+    unwrapRedirectUrl: Search.unwrapRedirectUrl,
+    extractSearchResults: Search.extractSearchResults,
+    mergeSearchResults: Search.mergeSearchResults,
+    buildSearchDocument: Search.buildSearchDocument,
+    isImageUrl: Search.isImageUrl,
+    isInternalSearchUrl: Library.isSearchUrl,
+    internalSearchQuery: Library.searchQuery,
+    internalSearchUrl: Library.searchUrl,
+    Search: Search,
     Library: Library,
     mount: mount,
     Browser: Browser
