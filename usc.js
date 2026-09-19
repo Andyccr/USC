@@ -56,6 +56,7 @@
     ":bookmarks",
     ":about",
     ":star",
+    ":install",
     ":help"
   ];
 
@@ -104,6 +105,7 @@
     if (lower === "font") return { type: "font", value: "show" };
     if (lower === "copy") return { type: "copy", index: 0 };
     if (lower === "share") return { type: "share" };
+    if (lower === "install") return { type: "install" };
     if (lower === "top") return { type: "scroll", edge: "top" };
     if (lower === "bottom") return { type: "scroll", edge: "bottom" };
     if (/^\d+$/.test(text)) return { type: "follow", index: parseInt(text, 10) };
@@ -421,8 +423,10 @@
         (themeMode === "system" &&
           typeof matchMedia === "function" &&
           matchMedia("(prefers-color-scheme: light)").matches);
-      var themeMeta = doc.querySelector('meta[name="theme-color"]');
-      if (themeMeta) themeMeta.setAttribute("content", light ? "#f2f0e9" : "#141413");
+      var themeMetas = doc.querySelectorAll('meta[name="theme-color"]');
+      for (var ti = 0; ti < themeMetas.length; ti++) {
+        themeMetas[ti].setAttribute("content", light ? "#f2f0e9" : "#141413");
+      }
       var appleBar = doc.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
       if (appleBar) appleBar.setAttribute("content", light ? "default" : "black-translucent");
       if (themeBtn) {
@@ -745,6 +749,26 @@
       updateProgress();
     }
 
+    function historyHref() {
+      var path = "./";
+      try {
+        path = window.location.pathname || "./";
+      } catch (e) {}
+      if (!current || !current.url) return path;
+      return Library.launchHref(current.url, path);
+    }
+
+    function publicHref() {
+      if (!current || !current.url) return "";
+      if (!Library.isLocalHost(current.url)) return current.url;
+      try {
+        var path = window.location.pathname || "/";
+        return window.location.origin + Library.launchHref(current.url, path);
+      } catch (e) {
+        return "";
+      }
+    }
+
     function setCurrent(documentModel, nav) {
       current = documentModel;
       view = "page";
@@ -754,7 +778,7 @@
         stackPos = 0;
         documentModel._historySeq = historySeq;
         if (nativeHistory) {
-          window.history.replaceState({ usc: true, seq: historySeq }, "", window.location.pathname);
+          window.history.replaceState({ usc: true, seq: historySeq }, "", historyHref());
         }
       } else if (nav === "replace") {
         var replaceSeq =
@@ -771,7 +795,7 @@
           window.history.replaceState(
             { usc: true, seq: stack[stackPos]._historySeq },
             "",
-            "#usc-" + stack[stackPos]._historySeq
+            historyHref()
           );
         }
       } else if (nav === "push") {
@@ -782,7 +806,7 @@
         if (stack.length > MAX_STACK) stack.shift();
         stackPos = stack.length - 1;
         if (nativeHistory) {
-          window.history.pushState({ usc: true, seq: historySeq }, "", "#usc-" + historySeq);
+          window.history.pushState({ usc: true, seq: historySeq }, "", historyHref());
         }
       }
       if (documentModel.title) doc.title = documentModel.title + " · USC";
@@ -842,6 +866,13 @@
       var fromSearch = Library.isSearchUrl(current && current.url) || Search.isSearchEngineUrl(abs);
       var allowProxy = proxyMode !== "off" || Search.isSearchEngineUrl(abs);
       var hit = cache[abs];
+      var offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      if (!hit && offline) {
+        cancelPending();
+        setCurrent(errorDocument(abs, "offline"), stackNav);
+        printMsg("offline", "err");
+        return;
+      }
 
       cancelPending();
       setCurrent(loadingDocument(abs, title), stackNav);
@@ -875,6 +906,7 @@
           return;
         }
         var message = timedOut ? "timeout" : err && err.message ? err.message : "error";
+        if (typeof navigator !== "undefined" && navigator.onLine === false) message = "offline";
         printMsg("fetch failed: " + message, "err");
         setCurrent(errorDocument(abs, message), "replace");
       }
@@ -953,12 +985,22 @@
       }
     }
 
-    function showSearchResults(query, selectedEngines) {
+    function showSearchResults(query, selectedEngines, nav) {
       cancelPending();
+      var stackNav = nav || "push";
       var engines = (selectedEngines || ALL).filter(function (name) {
         return !!ENGINES[name];
       });
       if (!engines.length) engines = ALL.slice();
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        var offlineDoc = Search.buildSearchDocument(query, [], {
+          status: "offline",
+          footer: "retry when back online"
+        });
+        setCurrent(offlineDoc, stackNav);
+        printMsg("offline", "err");
+        return;
+      }
       // Multi-engine search also queries DuckDuckGo in parallel — reliable SERP via Jina.
       var fetchList = engines.slice();
       if (engines.length > 1 && fetchList.indexOf("duckduckgo") < 0) {
@@ -976,7 +1018,7 @@
         status: "searching…",
         engines: engines
       });
-      setCurrent(loadingDoc, "push");
+      setCurrent(loadingDoc, stackNav);
       var hubPos = stackPos;
       setLoading(true);
       setStatus("search");
@@ -1242,8 +1284,12 @@
         refreshSurface();
         return;
       }
+      if (cmd.type === "install") {
+        printMsg("browser menu · add to Home Screen");
+        return;
+      }
       if (cmd.type === "copy") {
-        var copyTarget = current && current.url;
+        var copyTarget = publicHref();
         if (cmd.index) {
           copyTarget =
             current && current.links[cmd.index - 1] && current.links[cmd.index - 1].url;
@@ -1262,8 +1308,8 @@
         return;
       }
       if (cmd.type === "share") {
-        var shareUrl = current && current.url;
-        if (!shareUrl || shareUrl.indexOf("usc.local") >= 0) {
+        var shareUrl = publicHref();
+        if (!shareUrl) {
           printMsg("nothing to share", "err");
           return;
         }
@@ -1622,8 +1668,29 @@
       }
     });
 
+    function consumeLaunch(launch) {
+      if (!launch) return;
+      if (launch.type === "search") showSearchResults(launch.query, null, "initial");
+      else if (launch.type === "go") go(launch.url, "initial");
+      else if (launch.type === "surface") go(Library.surfaceUrl(launch.page), "initial");
+    }
+
+    function registerShell() {
+      if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
+      try {
+        if (window.location.protocol !== "http:" && window.location.protocol !== "https:") return;
+        navigator.serviceWorker.register("sw.js").catch(function () {});
+      } catch (e) {}
+    }
+
     applyAppearance();
-    setCurrent(homeDocument(), "initial");
+    var pendingLaunch = null;
+    try {
+      pendingLaunch = Library.parseLaunch(window.location.search, window.location.href);
+    } catch (e) {}
+    if (pendingLaunch) consumeLaunch(pendingLaunch);
+    if (!current) setCurrent(homeDocument(), "initial");
+    registerShell();
     input.focus();
 
     if (typeof matchMedia === "function") {

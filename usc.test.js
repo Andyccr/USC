@@ -74,6 +74,7 @@ assert.deepStrictEqual(USC.parseLine("theme light"), { type: "theme", mode: "lig
 assert.deepStrictEqual(USC.parseLine("theme"), { type: "theme", mode: "cycle" });
 assert.deepStrictEqual(USC.parseLine("theme auto"), { type: "theme", mode: "system" });
 assert.deepStrictEqual(USC.parseLine("about"), { type: "about" });
+assert.deepStrictEqual(USC.parseLine("install"), { type: "install" });
 assert.strictEqual(USC.nextTheme("dark"), "light");
 assert.strictEqual(USC.nextTheme("light"), "system");
 assert.strictEqual(USC.nextTheme("system"), "dark");
@@ -441,6 +442,47 @@ assert.strictEqual(
 assert.ok(Library.loadingMarkdown("https://ex.com/", "Hello").indexOf("loading") >= 0);
 assert.ok(Library.errorMarkdown("https://ex.com/", "timeout").indexOf("fetch failed") >= 0);
 assert.ok(Library.errorMarkdown("https://ex.com/", "timeout").indexOf("usc.local") >= 0);
+assert.ok(Library.errorMarkdown("https://ex.com/", "offline").indexOf("offline") >= 0);
+assert.ok(Library.errorMarkdown("https://ex.com/", "offline").indexOf("retry when back online") >= 0);
+assert.ok(Library.errorMarkdown("https://ex.com/", "offline").indexOf("fetch failed") < 0);
+assert.strictEqual(Library.isSectionLabel("offline"), true);
+assert.strictEqual(Library.isSectionLabel("retry when back online"), true);
+assert.deepStrictEqual(Library.parseLaunch("?p=settings"), { type: "surface", page: "settings" });
+assert.deepStrictEqual(Library.parseLaunch("p=HELP"), { type: "surface", page: "help" });
+assert.deepStrictEqual(Library.parseLaunch("?q=hello+world"), { type: "search", query: "hello world" });
+assert.deepStrictEqual(Library.parseLaunch("?url=https://en.wikipedia.org/wiki/X"), {
+  type: "go",
+  url: "https://en.wikipedia.org/wiki/X"
+});
+assert.deepStrictEqual(Library.parseLaunch("?text=see%20https://example.com/a."), {
+  type: "go",
+  url: "https://example.com/a"
+});
+assert.deepStrictEqual(Library.parseLaunch("?text=quantum%20computing"), {
+  type: "search",
+  query: "quantum computing"
+});
+assert.deepStrictEqual(Library.parseLaunch(""), null);
+assert.deepStrictEqual(
+  Library.parseLaunch(
+    "?url=" + encodeURIComponent("https://app.example/?q=hi"),
+    "https://app.example/"
+  ),
+  { type: "search", query: "hi" }
+);
+assert.strictEqual(Library.surfaceUrl("settings"), Library.SETTINGS);
+assert.strictEqual(Library.surfaceUrl("help"), Library.HELP);
+assert.strictEqual(Library.launchHref("https://usc.local/", "/"), "/");
+assert.strictEqual(Library.launchHref("https://usc.local/settings", "/"), "/?p=settings");
+assert.strictEqual(Library.launchHref("https://usc.local/search?q=hi", "/"), "/?q=hi");
+assert.strictEqual(
+  Library.launchHref("https://en.wikipedia.org/wiki/X", "/app/"),
+  "/app/?url=" + encodeURIComponent("https://en.wikipedia.org/wiki/X")
+);
+assert.deepStrictEqual(
+  Library.parseLaunch(Library.launchHref("https://usc.local/bookmarks", "/").slice(1)),
+  { type: "surface", page: "bookmarks" }
+);
 assert.strictEqual(Library.isHomeUrl("https://usc.local"), true);
 assert.strictEqual(Library.isHomeUrl("https://en.wikipedia.org/wiki/Hello"), false);
 assert.strictEqual(Library.isSettingsUrl("https://usc.local/settings"), true);
@@ -473,6 +515,8 @@ var aboutDoc = Browser.markdownToDocument(Library.aboutMarkdown(), Library.ABOUT
 assert.ok(aboutDoc.links.some(function (link) {
   return link.url === Library.HELP;
 }));
+assert.ok(Library.aboutMarkdown().indexOf("install") >= 0);
+assert.ok(Library.helpMarkdown().indexOf("install") >= 0);
 var imageDoc = Browser.markdownToDocument(
   Library.imageMarkdown("https://ex.com/a.png"),
   "https://ex.com/a.png"

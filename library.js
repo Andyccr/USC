@@ -32,6 +32,7 @@
     "font +    adjust text size\n" +
     "copy      copy current URL\n" +
     "share     share current page\n" +
+    "install   add to Home Screen\n" +
     "g hello  google only\n" +
     "s back   search a command word\n" +
     "real     open outside\n" +
@@ -54,6 +55,9 @@
     "images   links until you load them\n" +
     "\n" +
     "no backend · no index · no account\n" +
+    "install   add to home screen\n" +
+    "share     send a link into USC\n" +
+    "offline   home and settings still work\n" +
     "help     commands\n";
 
   function mdHref(url) {
@@ -243,6 +247,7 @@
     if (/^(theme|proxy|images|font)\b/.test(t)) return true;
     if (/^nothing here/.test(t) || /^star a page/.test(t) || /^no bookmarks/.test(t)) return true;
     if (/^loading/.test(t) || /^fetch failed/.test(t) || /^real  open/.test(t)) return true;
+    if (/^offline$/.test(t) || /^retry when back online/.test(t)) return true;
     return false;
   }
 
@@ -418,6 +423,19 @@
   function errorMarkdown(url, message) {
     var host = hostOf(url) || String(url || "");
     var detail = safeLabel(message) || "error";
+    if (detail === "offline") {
+      return (
+        "Title: " +
+        host +
+        "\nURL Source: " +
+        url +
+        "\n\nMarkdown Content:\n" +
+        host +
+        "\n\noffline\n\nretry when back online\n\n[home](" +
+        mdHref(HOME) +
+        ")\n"
+      );
+    }
     return (
       "Title: " +
       host +
@@ -433,6 +451,100 @@
       mdHref(HOME) +
       ")\n"
     );
+  }
+
+  function extractHttpUrl(text) {
+    var m = String(text || "").match(/https?:\/\/[^\s<>"']+/i);
+    if (!m) return "";
+    return m[0].replace(/[.,);]+$/, "");
+  }
+
+  function parseLaunch(search, pageUrl) {
+    var raw = String(search || "");
+    if (!raw) return null;
+    if (raw.charAt(0) === "?") raw = raw.slice(1);
+    var params;
+    try {
+      params = new URLSearchParams(raw);
+    } catch (e) {
+      return null;
+    }
+    var page = String(params.get("p") || params.get("page") || "")
+      .replace(/^\s+|\s+$/g, "")
+      .toLowerCase();
+    if (
+      page === "home" ||
+      page === "settings" ||
+      page === "help" ||
+      page === "about" ||
+      page === "history" ||
+      page === "bookmarks"
+    ) {
+      return { type: "surface", page: page };
+    }
+    var q = String(params.get("q") || "").replace(/^\s+|\s+$/g, "");
+    if (q) return { type: "search", query: q };
+    var url = String(params.get("url") || "").replace(/^\s+|\s+$/g, "");
+    if (url) {
+      if (pageUrl) {
+        try {
+          var abs = new URL(url, pageUrl);
+          var here = new URL(pageUrl);
+          if (abs.origin === here.origin) {
+            var inner = parseLaunch(abs.search, pageUrl);
+            if (inner) return inner;
+          }
+        } catch (e) {}
+      }
+      return { type: "go", url: url };
+    }
+    var text = String(params.get("text") || "").replace(/^\s+|\s+$/g, "");
+    var title = String(params.get("title") || "").replace(/^\s+|\s+$/g, "");
+    var extracted = extractHttpUrl(text) || extractHttpUrl(title);
+    if (extracted) return { type: "go", url: extracted };
+    if (text) return { type: "search", query: text };
+    if (title) return { type: "search", query: title };
+    return null;
+  }
+
+  function surfaceUrl(page) {
+    if (page === "settings") return SETTINGS;
+    if (page === "help") return HELP;
+    if (page === "about") return ABOUT;
+    if (page === "history") return HISTORY;
+    if (page === "bookmarks") return BOOKMARKS;
+    return HOME;
+  }
+
+  function launchHref(url, path) {
+    var base = String(path || "/");
+    if (!base) base = "/";
+    function withQuery(query) {
+      return base + "?" + query;
+    }
+    if (!url) return base;
+    if (isSearchUrl(url)) {
+      var q = searchQuery(url);
+      return q ? withQuery("q=" + encodeURIComponent(q)) : base;
+    }
+    var kind = surface(url);
+    if (
+      kind === "settings" ||
+      kind === "help" ||
+      kind === "about" ||
+      kind === "history" ||
+      kind === "bookmarks"
+    ) {
+      return withQuery("p=" + encodeURIComponent(kind));
+    }
+    if (kind === "home" || kind === "resume" || kind === "set" || kind === "local") return base;
+    try {
+      var abs = String(url);
+      if (/^https?:\/\//i.test(abs) && !isLocalHost(abs)) {
+        return withQuery("url=" + encodeURIComponent(abs));
+      }
+    } catch (e) {}
+    return base;
   }
 
   function textMarkdown(title, url, body) {
@@ -519,6 +631,10 @@
     aboutMarkdown: aboutMarkdown,
     imageMarkdown: imageMarkdown,
     loadingMarkdown: loadingMarkdown,
-    errorMarkdown: errorMarkdown
+    errorMarkdown: errorMarkdown,
+    extractHttpUrl: extractHttpUrl,
+    parseLaunch: parseLaunch,
+    surfaceUrl: surfaceUrl,
+    launchHref: launchHref
   };
 });
