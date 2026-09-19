@@ -3,14 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f2f0e9" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#141413">
   <meta name="color-scheme" content="dark light">
   <meta name="description" content="USC — 纯文本浏览器与站内搜索">
+  <meta name="format-detection" content="telephone=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="USC">
+  <meta property="og:title" content="USC">
+  <meta property="og:description" content="纯文本浏览器与站内搜索">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="mask-icon" href="favicon.svg" color="#141413">
   <link rel="manifest" href="manifest.json">
   <title>USC</title>
   <script>
@@ -114,7 +123,7 @@
     }
     body.home #page a.ln,
     body.library #page a.ln {
-      display: inline-block;
+      display: block;
       max-width: 100%;
       padding: 0.35em 0;
       line-height: 1.45;
@@ -133,7 +142,7 @@
     #page a.ln:hover { border-bottom-color: var(--fg); }
     #page a.ln:active { color: var(--dim); }
     body.search-results #page a.ln {
-      display: inline-block;
+      display: block;
       max-width: 100%;
       padding: 0.45em 0;
       line-height: 1.45;
@@ -282,6 +291,13 @@
         display: inline;
         line-height: 1.85;
         padding: 0.15em 0;
+      }
+      body.home #page a.ln,
+      body.library #page a.ln,
+      body.search-results #page a.ln {
+        display: block;
+        padding: 0.4em 0;
+        line-height: 1.45;
       }
       #status {
         font-size: 11px;

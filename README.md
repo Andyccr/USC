@@ -18,6 +18,24 @@ python3 -m http.server 8765
 
 访问 `http://127.0.0.1:8765/`。无第三方依赖。
 
+### 安装与分享
+
+这是可安装的应用壳（PWA），不是调试页：
+
+- 浏览器菜单 → **添加到主屏幕** / 安装应用（`install` 会提示这一步）
+- 离线时首页、设置、帮助、书签仍可用；未缓存的网页显示 `offline`
+- 打开或分享这些地址会直接进入对应页（地址栏保持可分享，不含 `#usc-N`）：
+
+```text
+/?q=量子计算
+/?url=https://en.wikipedia.org/wiki/Plain_text
+/?p=settings
+/?p=bookmarks
+/?p=help
+```
+
+系统「分享到 USC」走同一套参数（`title` / `text` / `url`）。
+
 ### 基本使用
 
 底部输入框同时是搜索框和地址栏：
@@ -56,6 +74,7 @@ python3 -m http.server 8765
 | `font +` / `-` / `reset` | 字号 |
 | `copy` / `copy <n>` | 复制当前 URL / 链接 n |
 | `share` | 系统分享，失败则复制 URL |
+| `install` | 提示如何添加到主屏幕 |
 | `top` / `bottom` | 跳到顶部 / 底部 |
 
 输入 `:` 打开命令联想。空输入时按空格翻页；`Esc` 停止加载。`Ctrl/Cmd + L` 聚焦输入，`Alt + T` 循环主题。
@@ -82,9 +101,11 @@ python3 -m http.server 8765
 ```text
 index.html     纯文本 UI、明暗主题、手机适配
 favicon.svg    图标
-manifest.json  可安装为应用
+icon-192.png / icon-512.png / apple-touch-icon.png
+manifest.json  可安装应用、快捷方式、分享入口
+sw.js          离线应用壳
 browser.js     取页、CORS/Jina、HTML/Markdown → 文档模型、纯文本导出
-library.js     本地知识层：usc.local 路由、最近/继续/书签、产品页 markdown
+library.js     本地知识层：usc.local 路由、启动参数、最近/继续/书签、产品页 markdown
 search.js      搜索引擎、SERP 抽取/去噪、结果页文档
 usc.js         命令解析、go 导航内核、历史栈、主题、渲染与交互
 usc.test.js    无依赖单元测试
@@ -99,6 +120,11 @@ flowchart TB
   subgraph UI["界面 index.html"]
     PAGE["#page 正文"]
     CHROME["#chrome 状态 / 提示 / 输入"]
+  end
+
+  subgraph SHELL["应用壳"]
+    SW["sw.js 离线缓存"]
+    LAUNCH["?q= · ?url= · ?p= · 分享"]
   end
 
   subgraph APP["usc.js"]
@@ -125,6 +151,8 @@ flowchart TB
   end
 
   CHROME -->|Enter| PARSE
+  LAUNCH --> NAV
+  SW --> UI
   PARSE -->|search| SEARCH
   PARSE -->|url / 编号 / 本地页| NAV
   SEARCH -->|结果页文档| PAINT
@@ -232,6 +260,7 @@ node usc.test.js
 - 半搜索引擎：不建索引、不执行目标站 JavaScript。  
 - 依赖浏览器网络；Jina 不可用时部分站点读不到。  
 - 加载超时 15s；缓存最多 20 页、每页 2MB；正文约 12 万字符后截断。
+- 安装与离线需要 HTTP(S)，不要用 `file://`。
 
 ---
 
@@ -250,6 +279,24 @@ python3 -m http.server 8765
 ```
 
 Visit `http://127.0.0.1:8765/`. No third-party dependencies.
+
+### Install and share
+
+USC is an installable app shell (PWA):
+
+- Browser menu → **Add to Home Screen** / Install (`install` reminds you)
+- Home, settings, help, and bookmarks still work offline; uncached pages show `offline`
+- These URLs open the matching surface (the address bar stays shareable; no `#usc-N`):
+
+```text
+/?q=quantum
+/?url=https://en.wikipedia.org/wiki/Plain_text
+/?p=settings
+/?p=bookmarks
+/?p=help
+```
+
+Sharing into USC uses the same `title` / `text` / `url` query params.
 
 ### Basic use
 
@@ -278,6 +325,7 @@ The `dark` / `light` / `auto` control at the bottom right cycles appearance. The
 | `find` / `star` / `bookmarks` | Find / save page (again to unstar) / bookmarks |
 | `history` / `resume` / `settings` | Session history / last page / preferences |
 | `theme` / `theme dark` / `light` / `system` | Cycle or set appearance (also the bottom-right control or `Alt+T`) |
+| `share` / `install` | Share this page / Home Screen hint |
 
 ### Cross-origin and privacy
 
@@ -294,9 +342,11 @@ After a refresh, home shows **continue** (last page or search) and **recent**. `
 ```text
 index.html     Text UI, light/dark theme, mobile chrome
 favicon.svg    Icon
-manifest.json  Installable app shell
+icon-192.png / icon-512.png / apple-touch-icon.png
+manifest.json  Installable app, shortcuts, share target
+sw.js          Offline app shell
 browser.js     Fetch, Jina, HTML/Markdown → document model
-library.js     usc.local routing, recents, continue, product-page markdown
+library.js     usc.local routing, launch query, recents, product-page markdown
 search.js      Engines, SERP extract/denoise, search-hub documents
 usc.js         Commands, go() kernel, history stack, theme, paint
 usc.test.js    Dependency-free tests
@@ -311,6 +361,11 @@ flowchart TB
   subgraph UI["index.html"]
     PAGE["#page"]
     CHROME["prompt / status"]
+  end
+
+  subgraph SHELL["app shell"]
+    SW["sw.js"]
+    LAUNCH["?q= · ?url= · ?p="]
   end
 
   subgraph APP["usc.js"]
@@ -337,6 +392,8 @@ flowchart TB
   end
 
   CHROME --> PARSE
+  LAUNCH --> NAV
+  SW --> UI
   PARSE -->|search| SEARCH
   PARSE -->|follow / local page| NAV
   SEARCH --> PAINT
@@ -396,3 +453,4 @@ node usc.test.js
 - Half search engine: no crawl/index; target-page JS is not executed.  
 - Needs network; if Jina is unreachable some sites cannot be read.  
 - 15s load timeout; 20 cached pages; ~120k character truncation.
+- Install and offline need HTTP(S); do not use `file://`.
