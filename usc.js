@@ -462,7 +462,7 @@
       if (href) {
         var link = doc.createElement("a");
         link.className = (className ? className + " " : "") + "ln";
-        link.href = "javascript:void(0)";
+        link.href = hrefFor(href);
         link.setAttribute("data-url", href);
         link.title = href;
         link.textContent = text;
@@ -654,7 +654,7 @@
           var a = doc.createElement("a");
           a.className = "ln";
           // Avoid href="#" which rewrites the History API hash (#usc-N → #).
-          a.href = "javascript:void(0)";
+          a.href = hrefFor(tok.url);
           a.setAttribute("data-url", tok.url);
           a.title = tok.url;
           a.setAttribute("draggable", "false");
@@ -688,7 +688,7 @@
           } else {
             var ph = doc.createElement("a");
             ph.className = "ln imgph";
-            ph.href = "javascript:void(0)";
+            ph.href = hrefFor(tok.url);
             ph.setAttribute("data-image", String(tok.n));
             ph.setAttribute("aria-label", "Load image " + tok.n);
             ph.title = tok.url;
@@ -766,6 +766,14 @@
         return window.location.origin + Library.launchHref(current.url, path);
       } catch (e) {
         return "";
+      }
+    }
+
+    function hrefFor(url) {
+      try {
+        return Library.launchHref(url, window.location.pathname || "/");
+      } catch (e) {
+        return Library.launchHref(url, "/");
       }
     }
 
@@ -1545,6 +1553,8 @@
     var lastActivateAt = 0;
 
     function followDataLink(event) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
+      if (event.button && event.button !== 0) return false;
       var el = eventElement(event.target);
       if (!el || !el.closest) return false;
       var imageButton = el.closest("[data-image]");
@@ -1579,13 +1589,6 @@
       function (event) {
         if (event.pointerType === "mouse") return;
         followDataLink(event);
-      },
-      true
-    );
-    page.addEventListener(
-      "auxclick",
-      function (event) {
-        if (event.button === 1) followDataLink(event);
       },
       true
     );

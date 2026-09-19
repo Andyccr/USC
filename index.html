@@ -123,7 +123,7 @@
     }
     body.home #page a.ln,
     body.library #page a.ln {
-      display: inline-block;
+      display: block;
       max-width: 100%;
       padding: 0.35em 0;
       line-height: 1.45;
@@ -142,7 +142,7 @@
     #page a.ln:hover { border-bottom-color: var(--fg); }
     #page a.ln:active { color: var(--dim); }
     body.search-results #page a.ln {
-      display: inline-block;
+      display: block;
       max-width: 100%;
       padding: 0.45em 0;
       line-height: 1.45;
@@ -291,6 +291,13 @@
         display: inline;
         line-height: 1.85;
         padding: 0.15em 0;
+      }
+      body.home #page a.ln,
+      body.library #page a.ln,
+      body.search-results #page a.ln {
+        display: block;
+        padding: 0.4em 0;
+        line-height: 1.45;
       }
       #status {
         font-size: 11px;
