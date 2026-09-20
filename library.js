@@ -6,6 +6,8 @@
   var MAX_RECENTS = 12;
   var MAX_HOME_RECENTS = 8;
   var MAX_HOME_BOOKMARKS = 6;
+  var MAX_PAGES = 20;
+  var MAX_PAGE_CHARS = 200000;
   var HOME = "https://usc.local/";
   var SETTINGS = "https://usc.local/settings";
   var RESUME = "https://usc.local/resume";
@@ -57,7 +59,7 @@
     "no backend · no index · no account\n" +
     "install   add to home screen\n" +
     "share     send a link into USC\n" +
-    "offline   home and settings still work\n" +
+    "offline   saved pages still open\n" +
     "help     commands\n";
 
   function mdHref(url) {
@@ -361,7 +363,7 @@
       mdHref(setUrl("font", "reset")) +
       ")\n\n" +
       "session\n" +
-      "[clear recents](" +
+      "[clear recents and saved pages](" +
       mdHref(setUrl("recents", "clear")) +
       ")\n\n" +
       "[home](" +
@@ -547,6 +549,57 @@
     return base;
   }
 
+  function clampScroll(n) {
+    n = Number(n);
+    if (!isFinite(n) || n < 0) return 0;
+    if (n > 1) return 1;
+    return n;
+  }
+
+  function shouldPersistPage(fetched) {
+    if (!fetched || !fetched.url || fetched.text == null || fetched.text === "") return false;
+    if (fetched.via === "error" || fetched.via === "loading" || fetched.via === "image-link") return false;
+    try {
+      var u = new URL(fetched.url);
+      if (u.hostname === "usc.local") return false;
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function packPage(fetched, extra) {
+    extra = extra || {};
+    if (!shouldPersistPage(fetched)) return null;
+    return {
+      url: String(fetched.url),
+      text: String(fetched.text).slice(0, MAX_PAGE_CHARS),
+      via: fetched.via || "",
+      scroll: clampScroll(extra.scroll),
+      at: extra.at || Date.now()
+    };
+  }
+
+  function mergePage(list, record) {
+    list = Array.isArray(list) ? list.slice() : [];
+    if (!record || !record.url) return list;
+    return [record].concat(
+      list.filter(function (row) {
+        return row && row.url && row.url !== record.url;
+      })
+    ).slice(0, MAX_PAGES);
+  }
+
+  function pageByUrl(list, url) {
+    var want = String(url || "");
+    if (!want) return null;
+    var rows = Array.isArray(list) ? list : [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] && rows[i].url === want) return rows[i];
+    }
+    return null;
+  }
+
   function textMarkdown(title, url, body) {
     return (
       "Title: " +
@@ -590,6 +643,8 @@
 
   return {
     MAX_RECENTS: MAX_RECENTS,
+    MAX_PAGES: MAX_PAGES,
+    MAX_PAGE_CHARS: MAX_PAGE_CHARS,
     HOME: HOME,
     SETTINGS: SETTINGS,
     RESUME: RESUME,
@@ -635,6 +690,11 @@
     extractHttpUrl: extractHttpUrl,
     parseLaunch: parseLaunch,
     surfaceUrl: surfaceUrl,
-    launchHref: launchHref
+    launchHref: launchHref,
+    clampScroll: clampScroll,
+    shouldPersistPage: shouldPersistPage,
+    packPage: packPage,
+    mergePage: mergePage,
+    pageByUrl: pageByUrl
   };
 });

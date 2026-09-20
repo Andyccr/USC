@@ -23,7 +23,7 @@ python3 -m http.server 8765
 这是可安装的应用壳（PWA），不是调试页：
 
 - 浏览器菜单 → **添加到主屏幕** / 安装应用（`install` 会提示这一步）
-- 离线时首页、设置、帮助、书签仍可用；未缓存的网页显示 `offline`
+- 离线时首页、设置、帮助、书签仍可用；读过的页面会保存在本机，刷新或下次打开仍能从 **continue** 立刻回到正文（滚动位置也记得）
 - 打开或分享这些地址会直接进入对应页（地址栏保持可分享，不含 `#usc-N`）：
 
 ```text
@@ -105,13 +105,13 @@ icon-192.png / icon-512.png / apple-touch-icon.png
 manifest.json  可安装应用、快捷方式、分享入口
 sw.js          离线应用壳
 browser.js     取页、CORS/Jina、HTML/Markdown → 文档模型、纯文本导出
-library.js     本地知识层：usc.local 路由、启动参数、最近/继续/书签、产品页 markdown
+library.js     本地知识层：usc.local 路由、启动参数、最近/继续/书签、已读页面、产品页 markdown
 search.js      搜索引擎、SERP 抽取/去噪、结果页文档
 usc.js         命令解析、go 导航内核、历史栈、主题、渲染与交互
 usc.test.js    无依赖单元测试
 ```
 
-产品页（首页、设置、历史、书签、帮助、关于）都是 **usc.local 上的 markdown 文档**。所有打开动作走同一套 `go(url)`：`Library.surface(url)` 决定本地页，搜索走 `search.js`，其余才 fetch。`usc.local` **从不发起网络请求**。打开远程页时立刻换成 loading 文档，成功或失败再替换为正文 / 错误页（点击后不会停在搜索列表上）。
+产品页（首页、设置、历史、书签、帮助、关于）都是 **usc.local 上的 markdown 文档**。所有打开动作走同一套 `go(url)`：`Library.surface(url)` 决定本地页，搜索走 `search.js`，其余才 fetch。`usc.local` **从不发起网络请求**。已读远程页保存在本机：再次打开（continue / 书签 / 后退）立刻出正文并恢复滚动；未读过的远程页先换成 loading，再换成正文或错误页。
 
 #### 总览
 
@@ -139,7 +139,7 @@ flowchart TB
 
   subgraph LIB["library.js"]
     HOME["home / settings / history / help"]
-    SESSION["recents + last · localStorage"]
+    SESSION["recents + saved pages"]
     ROUTE["surface(url)"]
   end
 
@@ -258,8 +258,8 @@ node usc.test.js
 ### 限制
 
 - 半搜索引擎：不建索引、不执行目标站 JavaScript。  
-- 依赖浏览器网络；Jina 不可用时部分站点读不到。  
-- 加载超时 15s；缓存最多 20 页、每页 2MB；正文约 12 万字符后截断。
+- 依赖浏览器网络；Jina 不可用时部分站点读不到。已读过的页面可在离线时打开。  
+- 加载超时 15s；最近约 20 页保存在本机、每页约 20 万字符；正文约 12 万字符后截断。
 - 安装与离线需要 HTTP(S)，不要用 `file://`。
 
 ---
@@ -285,7 +285,7 @@ Visit `http://127.0.0.1:8765/`. No third-party dependencies.
 USC is an installable app shell (PWA):
 
 - Browser menu → **Add to Home Screen** / Install (`install` reminds you)
-- Home, settings, help, and bookmarks still work offline; uncached pages show `offline`
+- Home, settings, help, and bookmarks still work offline; pages you already read are kept on this device, so **continue** opens the article immediately (scroll position included)
 - These URLs open the matching surface (the address bar stays shareable; no `#usc-N`):
 
 ```text
@@ -346,13 +346,13 @@ icon-192.png / icon-512.png / apple-touch-icon.png
 manifest.json  Installable app, shortcuts, share target
 sw.js          Offline app shell
 browser.js     Fetch, Jina, HTML/Markdown → document model
-library.js     usc.local routing, launch query, recents, product-page markdown
+library.js     usc.local routing, launch query, recents, saved pages, product-page markdown
 search.js      Engines, SERP extract/denoise, search-hub documents
 usc.js         Commands, go() kernel, history stack, theme, paint
 usc.test.js    Dependency-free tests
 ```
 
-Product surfaces (home, settings, history, bookmarks, help, about) are **markdown documents on usc.local**. Every open goes through `go(url)`: `Library.surface(url)` for app pages, `search.js` for the search hub, otherwise fetch. Host `usc.local` is **never fetched from the network**. Opening a remote page immediately replaces the current document with a loading page, then with article text or an error — clicks do not leave you staring at the search list.
+Product surfaces (home, settings, history, bookmarks, help, about) are **markdown documents on usc.local**. Every open goes through `go(url)`: `Library.surface(url)` for app pages, `search.js` for the search hub, otherwise fetch. Host `usc.local` is **never fetched from the network**. Pages you already read are kept on device: continue / bookmarks / back open instantly and restore scroll. A new remote page still shows loading, then article text or an error.
 
 #### Overview
 
@@ -380,7 +380,7 @@ flowchart TB
 
   subgraph LIB["library.js"]
     HOME["home / settings / history / help"]
-    SESSION["recents + last"]
+    SESSION["recents + saved pages"]
     ROUTE["surface(url)"]
   end
 
@@ -451,6 +451,6 @@ node usc.test.js
 ### Limitations
 
 - Half search engine: no crawl/index; target-page JS is not executed.  
-- Needs network; if Jina is unreachable some sites cannot be read.  
-- 15s load timeout; 20 cached pages; ~120k character truncation.
+- Needs network; if Jina is unreachable some sites cannot be read. Pages already read can open offline.  
+- 15s load timeout; about 20 saved pages on device; ~120k character truncation.
 - Install and offline need HTTP(S); do not use `file://`.
