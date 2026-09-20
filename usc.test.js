@@ -483,6 +483,53 @@ assert.deepStrictEqual(
   Library.parseLaunch(Library.launchHref("https://usc.local/bookmarks", "/").slice(1)),
   { type: "surface", page: "bookmarks" }
 );
+assert.strictEqual(Library.clampScroll(-1), 0);
+assert.strictEqual(Library.clampScroll(2), 1);
+assert.strictEqual(Library.clampScroll(0.4), 0.4);
+assert.strictEqual(
+  Library.shouldPersistPage({ url: "https://en.wikipedia.org/wiki/X", text: "Hello", via: "jina-md" }),
+  true
+);
+assert.strictEqual(
+  Library.shouldPersistPage({ url: "https://usc.local/settings", text: "x", via: "local" }),
+  false
+);
+assert.strictEqual(
+  Library.shouldPersistPage({ url: "https://en.wikipedia.org/wiki/X", text: "x", via: "loading" }),
+  false
+);
+var packed = Library.packPage(
+  { url: "https://ex.com/a", text: "z".repeat(Library.MAX_PAGE_CHARS + 50), via: "direct" },
+  { scroll: 1.5 }
+);
+assert.strictEqual(packed.text.length, Library.MAX_PAGE_CHARS);
+assert.strictEqual(packed.scroll, 1);
+assert.strictEqual(Library.packPage({ url: "https://ex.com/a", text: "", via: "direct" }), null);
+var pages = [];
+pages = Library.mergePage(pages, packed);
+pages = Library.mergePage(pages, {
+  url: "https://ex.com/b",
+  text: "b",
+  via: "direct",
+  scroll: 0,
+  at: 1
+});
+assert.strictEqual(pages[0].url, "https://ex.com/b");
+assert.strictEqual(pages.length, 2);
+pages = Library.mergePage(pages, packed);
+assert.strictEqual(pages[0].url, packed.url);
+assert.strictEqual(pages.length, 2);
+assert.strictEqual(Library.pageByUrl(pages, packed.url).text.length, Library.MAX_PAGE_CHARS);
+for (var extra = 0; extra < Library.MAX_PAGES + 3; extra++) {
+  pages = Library.mergePage(pages, {
+    url: "https://ex.com/n" + extra,
+    text: "n",
+    via: "direct",
+    scroll: 0,
+    at: extra
+  });
+}
+assert.strictEqual(pages.length, Library.MAX_PAGES);
 assert.strictEqual(Library.isHomeUrl("https://usc.local"), true);
 assert.strictEqual(Library.isHomeUrl("https://en.wikipedia.org/wiki/Hello"), false);
 assert.strictEqual(Library.isSettingsUrl("https://usc.local/settings"), true);
@@ -516,6 +563,7 @@ assert.ok(aboutDoc.links.some(function (link) {
   return link.url === Library.HELP;
 }));
 assert.ok(Library.aboutMarkdown().indexOf("install") >= 0);
+assert.ok(Library.aboutMarkdown().indexOf("saved pages") >= 0);
 assert.ok(Library.helpMarkdown().indexOf("install") >= 0);
 var imageDoc = Browser.markdownToDocument(
   Library.imageMarkdown("https://ex.com/a.png"),

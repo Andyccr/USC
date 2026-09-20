@@ -23,6 +23,8 @@
   var THEME_KEY = "usc.theme";
   var FONT_KEY = "usc.font";
   var SESSION_KEY = "usc.session";
+  var PAGE_DB = "usc-pages";
+  var PAGE_STORE = "pages";
   var COMMANDS = [
     ":back",
     ":forward",
@@ -265,6 +267,9 @@
     var findMatches = 0;
     var cache = {};
     var cacheOrder = [];
+    var scrolls = {};
+    var dbPromise = null;
+    var scrollTimer = null;
     var going = 0;
     var suggestTimer = null;
     var tabComplete = "";
@@ -390,12 +395,13 @@
         } else if (change.key === "recents" && change.value === "clear") {
           session = Library.clearSession();
           writeSession(session);
+          clearSavedPages();
         }
         cancelPending();
         setCurrent(settingsDocument(), "replace");
         printMsg(
           change.key === "recents"
-            ? "recents cleared"
+            ? "recents and saved pages cleared"
             : change.key + " " + (change.key === "theme" ? themeLabel(themeMode) : change.value)
         );
         return true;
@@ -524,13 +530,192 @@
       );
     }
 
-    function cachePut(url, fetched) {
-      if (!url) return;
-      if (!cache[url]) cacheOrder.push(url);
+    function cachePut(url, fetched, skipPersist) {
+      if (!url || !fetched) return;
+      cacheOrder = cacheOrder.filter(function (item) {
+        return item !== url;
+      });
+      cacheOrder.push(url);
       cache[url] = fetched;
       while (cacheOrder.length > MAX_CACHE) {
-        delete cache[cacheOrder.shift()];
+        var drop = cacheOrder.shift();
+        if (drop && drop !== url) delete cache[drop];
       }
+      if (!skipPersist) persistPage(fetched);
+    }
+
+    function openPagesDb() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise(function (resolve) {
+        if (typeof indexedDB === "undefined") {
+          resolve(null);
+          return;
+        }
+        try {
+          var req = indexedDB.open(PAGE_DB, 1);
+          req.onupgradeneeded = function () {
+            var db = req.result;
+            if (!db.objectStoreNames.contains(PAGE_STORE)) {
+              db.createObjectStore(PAGE_STORE, { keyPath: "url" });
+            }
+          };
+          req.onsuccess = function () {
+            resolve(req.result);
+          };
+          req.onerror = function () {
+            resolve(null);
+          };
+        } catch (e) {
+          resolve(null);
+        }
+      });
+      return dbPromise;
+    }
+
+    function persistPage(fetched) {
+      var record = Library.packPage(fetched, {
+        scroll: fetched && fetched.url ? scrolls[fetched.url] || 0 : 0
+      });
+      if (!record) return;
+      openPagesDb().then(function (db) {
+        if (!db) return;
+        try {
+          var tx = db.transaction(PAGE_STORE, "readwrite");
+          var store = tx.objectStore(PAGE_STORE);
+          store.put(record);
+          if (typeof store.getAll !== "function") return;
+          var all = store.getAll();
+          all.onsuccess = function () {
+            var rows = all.result || [];
+            if (rows.length <= MAX_CACHE) return;
+            rows.sort(function (a, b) {
+              return (a.at || 0) - (b.at || 0);
+            });
+            var extra = rows.length - MAX_CACHE;
+            for (var i = 0; i < extra; i++) {
+              if (rows[i] && rows[i].url && rows[i].url !== record.url) store.delete(rows[i].url);
+            }
+          };
+        } catch (e) {}
+      });
+    }
+
+    function persistScroll(url, ratio) {
+      if (!url) return;
+      openPagesDb().then(function (db) {
+        if (!db) return;
+        try {
+          var store = db.transaction(PAGE_STORE, "readwrite").objectStore(PAGE_STORE);
+          var req = store.get(url);
+          req.onsuccess = function () {
+            var row = req.result;
+            if (!row) return;
+            row.scroll = Library.clampScroll(ratio);
+            store.put(row);
+          };
+        } catch (e) {}
+      });
+    }
+
+    function idbGet(url) {
+      return openPagesDb().then(function (db) {
+        if (!db || !url) return null;
+        return new Promise(function (resolve) {
+          try {
+            var req = db.transaction(PAGE_STORE, "readonly").objectStore(PAGE_STORE).get(url);
+            req.onsuccess = function () {
+              resolve(req.result || null);
+            };
+            req.onerror = function () {
+              resolve(null);
+            };
+          } catch (e) {
+            resolve(null);
+          }
+        });
+      });
+    }
+
+    function idbDelete(url) {
+      openPagesDb().then(function (db) {
+        if (!db || !url) return;
+        try {
+          db.transaction(PAGE_STORE, "readwrite").objectStore(PAGE_STORE).delete(url);
+        } catch (e) {}
+      });
+    }
+
+    function clearSavedPages() {
+      cache = {};
+      cacheOrder = [];
+      scrolls = {};
+      openPagesDb().then(function (db) {
+        if (!db) return;
+        try {
+          db.transaction(PAGE_STORE, "readwrite").objectStore(PAGE_STORE).clear();
+        } catch (e) {}
+      });
+    }
+
+    function hydratePages() {
+      return openPagesDb().then(function (db) {
+        if (!db) return;
+        return new Promise(function (resolve) {
+          try {
+            var store = db.transaction(PAGE_STORE, "readonly").objectStore(PAGE_STORE);
+            if (typeof store.getAll !== "function") {
+              resolve();
+              return;
+            }
+            var req = store.getAll();
+            req.onsuccess = function () {
+              var list = req.result || [];
+              list.sort(function (a, b) {
+                return (a.at || 0) - (b.at || 0);
+              });
+              if (list.length > MAX_CACHE) list = list.slice(list.length - MAX_CACHE);
+              for (var i = 0; i < list.length; i++) {
+                var row = list[i];
+                if (!row || !row.url || !row.text) continue;
+                cachePut(row.url, { url: row.url, text: row.text, via: row.via }, true);
+                if (row.scroll) scrolls[row.url] = row.scroll;
+              }
+              resolve();
+            };
+            req.onerror = function () {
+              resolve();
+            };
+          } catch (e) {
+            resolve();
+          }
+        });
+      });
+    }
+
+    function canRestoreScroll(doc) {
+      if (!doc || !doc.url) return false;
+      if (doc.via === "loading" || doc.via === "error") return false;
+      if (Library.isHomeUrl(doc.url) || Library.isSurfaceUrl(doc.url)) return false;
+      return true;
+    }
+
+    function snapshotScroll() {
+      if (!page || !canRestoreScroll(current)) return;
+      var max = page.scrollHeight - page.clientHeight;
+      var ratio = max > 0 ? page.scrollTop / max : 0;
+      current._scroll = ratio;
+      scrolls[current.url] = ratio;
+      persistScroll(current.url, ratio);
+    }
+
+    function restoreScroll() {
+      if (!page || !canRestoreScroll(current)) return;
+      var ratio = current._scroll;
+      if (ratio == null && current.url) ratio = scrolls[current.url];
+      ratio = Library.clampScroll(ratio);
+      if (!ratio) return;
+      var max = page.scrollHeight - page.clientHeight;
+      if (max > 0) page.scrollTop = Math.round(max * ratio);
     }
 
     function cancelPending() {
@@ -548,9 +733,7 @@
 
     function paintStatus() {
       if (!current || Library.isHomeUrl(current.url)) {
-        setStatus(
-          "theme " + themeLabel(themeMode) + "    proxy " + proxyMode + (session.last ? "    resume" : "")
-        );
+        setStatus("");
         return;
       }
       if (Library.isSurfaceUrl(current.url)) {
@@ -746,6 +929,7 @@
         paintDoc(current);
       }
       paintStatus();
+      restoreScroll();
       updateProgress();
     }
 
@@ -778,6 +962,7 @@
     }
 
     function setCurrent(documentModel, nav) {
+      snapshotScroll();
       current = documentModel;
       view = "page";
       findQuery = "";
@@ -820,6 +1005,29 @@
       if (documentModel.title) doc.title = documentModel.title + " · USC";
       if (nav !== "initial") rememberCurrent(documentModel);
       paint();
+    }
+
+    function documentFromFetched(abs, fetched) {
+      if (fetched.via === "direct-image" || Search.isImageUrl(fetched.url || abs)) {
+        var onlyImage = Browser.markdownToDocument(
+          Library.imageMarkdown(fetched.url || abs),
+          fetched.url || abs
+        );
+        onlyImage.via = fetched.via || "image-link";
+        return onlyImage;
+      }
+      var raw = String(fetched.text || "").slice(0, MAX_RAW);
+      var documentModel = Browser.parseFetched(raw, fetched.url || abs);
+      documentModel.raw = raw;
+      documentModel.via = fetched.via;
+      return documentModel;
+    }
+
+    function showCached(abs, hit, stackNav) {
+      var documentModel = documentFromFetched(abs, hit);
+      applyImageMode(documentModel);
+      setLoading(false);
+      setCurrent(documentModel, stackNav);
     }
 
     function go(rawUrl, nav, title) {
@@ -875,10 +1083,10 @@
       var allowProxy = proxyMode !== "off" || Search.isSearchEngineUrl(abs);
       var hit = cache[abs];
       var offline = typeof navigator !== "undefined" && navigator.onLine === false;
-      if (!hit && offline) {
+      if (hit) {
         cancelPending();
-        setCurrent(errorDocument(abs, "offline"), stackNav);
-        printMsg("offline", "err");
+        cachePut(abs, hit);
+        showCached(abs, hit, stackNav);
         return;
       }
 
@@ -919,50 +1127,62 @@
         setCurrent(errorDocument(abs, message), "replace");
       }
 
-      var req = hit
-        ? Promise.resolve(hit)
-        : Browser.fetchPage(abs, {
-            signal: controller && controller.signal,
-            proxy: allowProxy,
-            forceProxy: allowProxy && fromSearch,
-            format: "markdown"
-          });
-      req
-        .then(function (fetched) {
-          if (ticket !== going) return;
-          if (fetched.via === "direct-image" || Search.isImageUrl(fetched.url || abs)) {
-            var onlyImage = Browser.markdownToDocument(Library.imageMarkdown(fetched.url || abs), fetched.url || abs);
-            onlyImage.via = fetched.via || "image-link";
-            finishPage(onlyImage);
-            return;
-          }
-          var raw = fetched.text.slice(0, MAX_RAW);
-          var stored = { url: fetched.url || abs, text: raw, via: fetched.via };
-          cachePut(abs, stored);
-          cachePut(stored.url, stored);
-          var documentModel = Browser.parseFetched(raw, fetched.url || abs);
-          documentModel.raw = raw;
-          documentModel.via = fetched.via;
-          var plain = Browser.pageToPlainText(documentModel).replace(/\s+/g, " ").trim();
-          if (allowProxy && fetched.via.indexOf("jina-") !== 0 && plain.length < 120) {
-            setStatus("retry text…");
-            return Browser.fetchPage(abs, {
-              signal: controller && controller.signal,
-              forceProxy: true,
-              format: "markdown"
-            }).then(function (again) {
-              if (ticket !== going) return;
-              var raw2 = again.text.slice(0, MAX_RAW);
-              cachePut(abs, { url: again.url || abs, text: raw2, via: again.via });
-              var retryDoc = Browser.parseFetched(raw2, again.url || abs);
-              retryDoc.raw = raw2;
-              retryDoc.via = again.via;
-              finishPage(retryDoc);
-            });
-          }
-          finishPage(documentModel);
+      function fetchRemote() {
+        if (offline) {
+          failPage({ message: "offline" });
+          return;
+        }
+        Browser.fetchPage(abs, {
+          signal: controller && controller.signal,
+          proxy: allowProxy,
+          forceProxy: allowProxy && fromSearch,
+          format: "markdown"
         })
-        .catch(failPage);
+          .then(function (fetched) {
+            if (ticket !== going) return;
+            if (fetched.via === "direct-image" || Search.isImageUrl(fetched.url || abs)) {
+              finishPage(documentFromFetched(abs, fetched));
+              return;
+            }
+            var raw = fetched.text.slice(0, MAX_RAW);
+            var stored = { url: fetched.url || abs, text: raw, via: fetched.via };
+            cachePut(abs, stored);
+            cachePut(stored.url, stored);
+            var documentModel = documentFromFetched(abs, stored);
+            var plain = Browser.pageToPlainText(documentModel).replace(/\s+/g, " ").trim();
+            if (allowProxy && fetched.via.indexOf("jina-") !== 0 && plain.length < 120) {
+              setStatus("retry text…");
+              return Browser.fetchPage(abs, {
+                signal: controller && controller.signal,
+                forceProxy: true,
+                format: "markdown"
+              }).then(function (again) {
+                if (ticket !== going) return;
+                var raw2 = again.text.slice(0, MAX_RAW);
+                cachePut(abs, { url: again.url || abs, text: raw2, via: again.via });
+                finishPage(documentFromFetched(abs, { url: again.url || abs, text: raw2, via: again.via }));
+              });
+            }
+            finishPage(documentModel);
+          })
+          .catch(failPage);
+      }
+
+      idbGet(abs).then(function (row) {
+        if (ticket !== going) return;
+        if (row && row.text) {
+          clearTimeout(loadTimer);
+          var stored = { url: row.url || abs, text: row.text, via: row.via };
+          cachePut(abs, stored, true);
+          if (row.scroll) scrolls[abs] = row.scroll;
+          showCached(abs, stored, "replace");
+          return;
+        }
+        fetchRemote();
+      }).catch(function () {
+        if (ticket !== going) return;
+        fetchRemote();
+      });
     }
 
     function follow(index) {
@@ -1190,6 +1410,7 @@
           return;
         }
         stackPos -= 1;
+        snapshotScroll();
         current = stack[stackPos];
         view = "page";
         paint();
@@ -1206,6 +1427,7 @@
           return;
         }
         stackPos += 1;
+        snapshotScroll();
         current = stack[stackPos];
         view = "page";
         paint();
@@ -1217,6 +1439,8 @@
           return;
         }
         delete cache[current.url];
+        delete scrolls[current.url];
+        idbDelete(current.url);
         go(current.url, "replace");
         return;
       }
@@ -1600,6 +1824,7 @@
         if (!state || !state.usc) return;
         for (var i = 0; i < stack.length; i++) {
           if (stack[i]._historySeq === state.seq) {
+            snapshotScroll();
             stackPos = i;
             current = stack[i];
             view = "page";
@@ -1635,7 +1860,15 @@
       input.focus();
     });
 
-    page.addEventListener("scroll", updateProgress, { passive: true });
+    page.addEventListener(
+      "scroll",
+      function () {
+        updateProgress();
+        if (scrollTimer) clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(snapshotScroll, 240);
+      },
+      { passive: true }
+    );
 
     doc.addEventListener("keydown", function (event) {
       if ((event.ctrlKey || event.metaKey) && (event.key === "l" || event.key === "k")) {
@@ -1687,6 +1920,7 @@
     }
 
     applyAppearance();
+    hydratePages();
     var pendingLaunch = null;
     try {
       pendingLaunch = Library.parseLaunch(window.location.search, window.location.href);
