@@ -8,6 +8,7 @@
   var MAX_HOME_BOOKMARKS = 6;
   var MAX_PAGES = 20;
   var MAX_PAGE_CHARS = 200000;
+  var MAX_NEXT = 4;
   var HOME = "https://usc.local/";
   var SETTINGS = "https://usc.local/settings";
   var RESUME = "https://usc.local/resume";
@@ -29,6 +30,7 @@
     "theme     tap / Alt+T · dark light auto\n" +
     "settings  appearance · proxy · font\n" +
     "resume    reopen last page\n" +
+    "next      keep reading from this page\n" +
     "star      bookmark / unbookmark\n" +
     "history   this session\n" +
     "font +    adjust text size\n" +
@@ -51,6 +53,7 @@
     "         tap the label · Alt+T · theme\n" +
     "settings  theme · proxy · images · font\n" +
     "resume    last page after refresh\n" +
+    "next      follow the page onward\n" +
     "star      save this page\n" +
     "history   this session\n" +
     "proxy    auto (Jina when blocked)\n" +
@@ -220,8 +223,19 @@
       title: title,
       url: entry.url,
       kind: kind,
-      at: entry.at || Date.now()
+      at: entry.at || Date.now(),
+      scroll: clampScroll(entry.scroll)
     };
+    if (kind === "page" && Array.isArray(entry.next) && entry.next.length) {
+      item.next = entry.next.slice(0, MAX_NEXT).map(function (row) {
+        return {
+          title: safeLabel(row && (row.title || row.text)) || hostOf(row && row.url) || "",
+          url: row && row.url
+        };
+      }).filter(function (row) {
+        return row.url && row.url !== item.url;
+      });
+    }
     recents = [item].concat(
       recents.filter(function (row) {
         return row && row.url && row.url !== item.url;
@@ -244,7 +258,7 @@
     var t = String(text || "").replace(/^\s+|\s+$/g, "");
     if (!t) return false;
     if (/^type to search/.test(t)) return true;
-    if (/^(continue|recent|bookmarks|session|this session|related)$/.test(t)) return true;
+    if (/^(continue|recent|bookmarks|session|this session|related|next)$/.test(t)) return true;
     if (/^searching/.test(t) || /^no results/.test(t)) return true;
     if (/^(theme|proxy|images|font)\b/.test(t)) return true;
     if (/^nothing here/.test(t) || /^star a page/.test(t) || /^no bookmarks/.test(t)) return true;
@@ -270,7 +284,14 @@
 
     if (last && last.url) {
       md += "continue\n";
-      addLink(last.title || last.url, last.url);
+      addLink(titledProgress(last.title || last.url, last.scroll), last.url);
+      if (last.kind !== "search" && Array.isArray(last.next) && last.next.length) {
+        md += "next\n";
+        for (var n = 0; n < last.next.length; n++) {
+          if (!last.next[n] || !last.next[n].url) continue;
+          addLink(last.next[n].title || last.next[n].url, last.next[n].url);
+        }
+      }
       md += "\n";
     }
 
@@ -283,7 +304,7 @@
     if (recentLines.length) {
       md += "recent\n";
       for (var r = 0; r < recentLines.length; r++) {
-        addLink(recentLines[r].title, recentLines[r].url);
+        addLink(titledProgress(recentLines[r].title, recentLines[r].scroll), recentLines[r].url);
       }
       md += "\n";
     }
@@ -600,6 +621,170 @@
     return null;
   }
 
+  function pageKey(url) {
+    try {
+      var u = new URL(url);
+      u.hash = "";
+      var path = (u.pathname || "/").replace(/\/$/, "") || "/";
+      return u.protocol + "//" + u.host + path;
+    } catch (e) {
+      return String(url || "");
+    }
+  }
+
+  function progressLabel(scroll) {
+    var p = clampScroll(scroll);
+    if (p < 0.12 || p >= 0.92) return "";
+    return Math.round(p * 100) + "%";
+  }
+
+  function titledProgress(title, scroll) {
+    var label = safeLabel(title);
+    var bit = progressLabel(scroll);
+    if (!bit) return label;
+    return label + " · " + bit;
+  }
+
+  function isTrailLabel(text) {
+    return /^next$/.test(String(text || "").replace(/^\s+|\s+$/g, ""));
+  }
+
+  function isSeeAlsoLabel(text) {
+    return /^(see also|related articles|related|相关条目|相关阅读|参见)$/i.test(
+      String(text || "").replace(/^\s+|\s+$/g, "")
+    );
+  }
+
+  function isWeakNextLabel(text) {
+    var t = safeLabel(text).toLowerCase();
+    if (!t || t.length < 4) return true;
+    if (
+      /^(edit|cite|here|more|source|link|website|homepage|click|this|that|pdf|doi|http|https|www)$/.test(
+        t
+      )
+    ) {
+      return true;
+    }
+    if (/^https?:/.test(t)) return true;
+    if (/^\d+$/.test(t)) return true;
+    return false;
+  }
+
+  function isTrailNoiseUrl(url) {
+    try {
+      var u = new URL(url);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return true;
+      if (u.hostname === "usc.local") return true;
+      var path = decodeURIComponent(u.pathname || "");
+      if (u.searchParams.get("action") === "edit") return true;
+      if (
+        /\/wiki\/(File|Help|Wikipedia|Template|Special|Talk|User|Portal|MediaWiki|Category|Draft):/i.test(
+          path
+        )
+      ) {
+        return true;
+      }
+      if (path.indexOf("/w/index.php") === 0) return true;
+      if (
+        /\/(login|signin|signup|register|privacy|terms|cookie|account|subscribe|checkout)\b/i.test(
+          path
+        )
+      ) {
+        return true;
+      }
+      if (/\.(png|jpe?g|gif|webp|svg|css|js)(\?|$)/i.test(path)) return true;
+      var host = u.hostname.replace(/^www\./, "").toLowerCase();
+      if (/creativecommons\.org$/.test(host)) return true;
+      return false;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function pickNextLinks(doc, opts) {
+    opts = opts || {};
+    if (!doc || !Array.isArray(doc.links) || !doc.links.length) return [];
+    var pageUrl = doc.url || opts.url || "";
+    var pageHost = hostOf(pageUrl);
+    var visited = {};
+    visited[pageKey(pageUrl)] = 1;
+    var recents = Array.isArray(opts.recents) ? opts.recents : [];
+    for (var r = 0; r < recents.length; r++) {
+      if (recents[r] && recents[r].url) visited[pageKey(recents[r].url)] = 1;
+    }
+    var extra = Array.isArray(opts.visited) ? opts.visited : [];
+    for (var v = 0; v < extra.length; v++) visited[pageKey(extra[v])] = 1;
+
+    var tokens = Array.isArray(doc.tokens) ? doc.tokens : [];
+    var total = tokens.length || 1;
+    var posByUrl = {};
+    var afterSeeAlso = {};
+    var sawSeeAlso = false;
+    for (var t = 0; t < tokens.length; t++) {
+      var tok = tokens[t];
+      if (tok && tok.t === "text" && isSeeAlsoLabel(tok.v)) sawSeeAlso = true;
+      if (tok && tok.t === "link" && tok.url && posByUrl[tok.url] == null) {
+        posByUrl[tok.url] = t / total;
+        if (sawSeeAlso) afterSeeAlso[tok.url] = 1;
+      }
+    }
+
+    var seen = {};
+    var ranked = [];
+    for (var i = 0; i < doc.links.length; i++) {
+      var link = doc.links[i];
+      if (!link || !link.url) continue;
+      var key = pageKey(link.url);
+      if (!key || seen[key] || visited[key]) continue;
+      if (isTrailNoiseUrl(link.url) || isWeakNextLabel(link.text)) continue;
+      seen[key] = 1;
+      var host = hostOf(link.url);
+      var pos = posByUrl[link.url];
+      if (pos == null) pos = i / Math.max(doc.links.length, 1);
+      var score = 0;
+      if (host && host === pageHost) score += 4;
+      else score += 1;
+      if (afterSeeAlso[link.url]) score += 5;
+      else if (pos >= 0.55) score += 3;
+      else if (pos >= 0.35) score += 1;
+      else score -= 4;
+      var label = safeLabel(link.text);
+      if (label.length >= 16) score += 1;
+      if (label.length >= 8) score += 1;
+      ranked.push({ title: label, url: link.url, host: host, score: score });
+    }
+    ranked.sort(function (a, b) {
+      return b.score - a.score || a.title.localeCompare(b.title);
+    });
+    var out = [];
+    for (var n = 0; n < ranked.length && out.length < MAX_NEXT; n++) {
+      var item = ranked[n];
+      if (item.score < 3) continue;
+      out.push({ title: item.title, url: item.url });
+    }
+    return out;
+  }
+
+  function appendNext(doc, nextLinks) {
+    if (!doc || !Array.isArray(nextLinks) || !nextLinks.length) return doc;
+    if (!Array.isArray(doc.tokens)) doc.tokens = [];
+    if (!Array.isArray(doc.links)) doc.links = [];
+    var n = 0;
+    for (var i = 0; i < doc.links.length; i++) {
+      if (doc.links[i] && doc.links[i].n > n) n = doc.links[i].n;
+    }
+    doc.tokens.push({ t: "nl" }, { t: "nl" }, { t: "text", v: "next" }, { t: "nl" });
+    for (var k = 0; k < nextLinks.length; k++) {
+      var row = nextLinks[k];
+      if (!row || !row.url) continue;
+      n += 1;
+      var title = safeLabel(row.title || row.text || hostOf(row.url) || row.url);
+      doc.links.push({ n: n, text: title, url: row.url });
+      doc.tokens.push({ t: "link", n: n, v: title, url: row.url }, { t: "nl" });
+    }
+    return doc;
+  }
+
   function textMarkdown(title, url, body) {
     return (
       "Title: " +
@@ -645,6 +830,7 @@
     MAX_RECENTS: MAX_RECENTS,
     MAX_PAGES: MAX_PAGES,
     MAX_PAGE_CHARS: MAX_PAGE_CHARS,
+    MAX_NEXT: MAX_NEXT,
     HOME: HOME,
     SETTINGS: SETTINGS,
     RESUME: RESUME,
@@ -695,6 +881,13 @@
     shouldPersistPage: shouldPersistPage,
     packPage: packPage,
     mergePage: mergePage,
-    pageByUrl: pageByUrl
+    pageByUrl: pageByUrl,
+    pageKey: pageKey,
+    progressLabel: progressLabel,
+    titledProgress: titledProgress,
+    isTrailLabel: isTrailLabel,
+    isTrailNoiseUrl: isTrailNoiseUrl,
+    pickNextLinks: pickNextLinks,
+    appendNext: appendNext
   };
 });
