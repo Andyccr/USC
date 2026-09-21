@@ -75,6 +75,12 @@ assert.deepStrictEqual(USC.parseLine("theme"), { type: "theme", mode: "cycle" })
 assert.deepStrictEqual(USC.parseLine("theme auto"), { type: "theme", mode: "system" });
 assert.deepStrictEqual(USC.parseLine("about"), { type: "about" });
 assert.deepStrictEqual(USC.parseLine("install"), { type: "install" });
+assert.deepStrictEqual(USC.parseLine("next"), { type: "next" });
+assert.deepStrictEqual(USC.parseLine("s next"), {
+  type: "search",
+  engines: ["google", "bing", "baidu"],
+  query: "next"
+});
 assert.strictEqual(USC.nextTheme("dark"), "light");
 assert.strictEqual(USC.nextTheme("light"), "system");
 assert.strictEqual(USC.nextTheme("system"), "dark");
@@ -565,6 +571,7 @@ assert.ok(aboutDoc.links.some(function (link) {
 assert.ok(Library.aboutMarkdown().indexOf("install") >= 0);
 assert.ok(Library.aboutMarkdown().indexOf("saved pages") >= 0);
 assert.ok(Library.helpMarkdown().indexOf("install") >= 0);
+assert.ok(Library.helpMarkdown().indexOf("next") >= 0);
 var imageDoc = Browser.markdownToDocument(
   Library.imageMarkdown("https://ex.com/a.png"),
   "https://ex.com/a.png"
@@ -631,6 +638,65 @@ assert.ok(homeMd.indexOf("usc.local/help") >= 0);
 var emptyHome = Library.homeMarkdown({});
 assert.ok(emptyHome.indexOf("type to search") >= 0);
 assert.ok(emptyHome.indexOf("continue") < 0);
+
+var trailHome = Library.homeMarkdown({
+  last: {
+    title: "Hello",
+    url: "https://en.wikipedia.org/wiki/Hello",
+    kind: "page",
+    scroll: 0.42,
+    next: [{ title: "Adele", url: "https://en.wikipedia.org/wiki/Adele" }]
+  },
+  recents: []
+});
+assert.ok(trailHome.indexOf("Hello · 42%") >= 0);
+assert.ok(trailHome.indexOf("\nnext\n") >= 0);
+assert.ok(trailHome.indexOf("en.wikipedia.org/wiki/Adele") >= 0);
+assert.strictEqual(Library.progressLabel(0.05), "");
+assert.strictEqual(Library.progressLabel(0.95), "");
+assert.strictEqual(Library.isSectionLabel("next"), true);
+assert.strictEqual(Library.isTrailLabel("next"), true);
+assert.strictEqual(Library.isTrailNoiseUrl("https://en.wikipedia.org/wiki/File:X.png"), true);
+assert.strictEqual(Library.isTrailNoiseUrl("https://en.wikipedia.org/wiki/Adele"), false);
+
+var trailDoc = {
+  url: "https://en.wikipedia.org/wiki/Hello",
+  links: [
+    { n: 1, text: "English language", url: "https://en.wikipedia.org/wiki/English_language" },
+    { n: 2, text: "edit", url: "https://en.wikipedia.org/w/index.php?title=Hello&action=edit" },
+    { n: 3, text: "Adele", url: "https://en.wikipedia.org/wiki/Adele" },
+    { n: 4, text: "Someone Like You (Adele song)", url: "https://en.wikipedia.org/wiki/Someone_Like_You_(Adele_song)" }
+  ],
+  tokens: [
+    { t: "link", url: "https://en.wikipedia.org/wiki/English_language", v: "English language" },
+    { t: "nl" }, { t: "nl" }, { t: "nl" }, { t: "nl" }, { t: "nl" },
+    { t: "nl" }, { t: "nl" }, { t: "nl" }, { t: "nl" }, { t: "nl" },
+    { t: "text", v: "see also" },
+    { t: "nl" },
+    { t: "link", url: "https://en.wikipedia.org/wiki/Adele", v: "Adele" },
+    { t: "nl" },
+    { t: "link", url: "https://en.wikipedia.org/wiki/Someone_Like_You_(Adele_song)", v: "Someone Like You (Adele song)" }
+  ]
+};
+var picked = Library.pickNextLinks(trailDoc, {
+  recents: [{ url: "https://en.wikipedia.org/wiki/Adele" }]
+});
+assert.ok(picked.length >= 1);
+assert.strictEqual(picked[0].url, "https://en.wikipedia.org/wiki/Someone_Like_You_(Adele_song)");
+assert.ok(!picked.some(function (row) { return row.url.indexOf("Adele") >= 0 && row.url.indexOf("Someone") < 0; }));
+assert.ok(!picked.some(function (row) { return /English_language/.test(row.url); }));
+var withNext = Library.appendNext({ tokens: [], links: [] }, picked);
+assert.ok(withNext.links.length >= 1);
+assert.ok(withNext.tokens.some(function (tok) { return tok.t === "text" && tok.v === "next"; }));
+
+var rememberedTrail = Library.remember({ recents: [], last: null }, {
+  title: "Hello",
+  url: "https://en.wikipedia.org/wiki/Hello",
+  scroll: 0.4,
+  next: [{ title: "Adele", url: "https://en.wikipedia.org/wiki/Adele" }]
+});
+assert.strictEqual(rememberedTrail.last.scroll, 0.4);
+assert.strictEqual(rememberedTrail.last.next[0].url, "https://en.wikipedia.org/wiki/Adele");
 
 var homeDoc = Browser.markdownToDocument(homeMd, Library.HOME);
 assert.ok(homeDoc.links.some(function (link) {

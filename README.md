@@ -43,6 +43,7 @@ python3 -m http.server 8765
 - 输入文字并回车 → 在 **USC 内**汇总搜索结果（标题 / 站点 / 摘要）
 - 输入编号或点击结果 → 打开**二级页面正文**（纯文本，仍留在 USC）
 - 输入网址并回车 → 读取该页正文
+- 文章末尾的 **next** 是从本页挑出的下文，点了仍留在 USC；首页 **continue** 会带阅读进度，并列出可接着读的篇
 - 图片以 `[img:n …]` 链接展示；点击或 `i n` 才加载
 
 ```text
@@ -68,6 +69,7 @@ python3 -m http.server 8765
 | `find <词>` | 页内查找 |
 | `bookmark` / `star` / `bookmarks` | 收藏当前页（再一次取消）/ 打开书签 |
 | `history` / `resume` | 本会话历史 / 打开上次页面 |
+| `next` | 打开本页的下一篇（文章 `next` 的第一条） |
 | `settings` | 主题、代理、图片、字号、清空最近 |
 | `proxy auto` / `on` / `off` | 自动 / 允许 / 禁止 Jina（默认 `auto`） |
 | `theme` / `theme dark` / `light` / `system` | 循环或指定明暗（也可用右下角按钮或 `Alt+T`） |
@@ -305,6 +307,7 @@ The bottom field is both search box and address bar:
 - Type text → in-app result list (title / host / snippet)  
 - Type a number or click a result → open the **secondary page as text** inside USC  
 - Type a URL → read that page as text  
+- Article **next** links keep reading inside USC; home **continue** shows progress and the next reads  
 - Images stay `[img:n …]` links until click / `i n`
 
 Type `:` to open command suggestions. With an empty prompt, Space scrolls; `Esc` stops loading. `Ctrl/Cmd + L` focuses the prompt, `Alt + T` cycles the theme.
@@ -324,6 +327,7 @@ The `dark` / `light` / `auto` control at the bottom right cycles appearance. The
 | `real` / `real <n>` | Open outside |
 | `find` / `star` / `bookmarks` | Find / save page (again to unstar) / bookmarks |
 | `history` / `resume` / `settings` | Session history / last page / preferences |
+| `next` | Open the first `next` read from this page |
 | `theme` / `theme dark` / `light` / `system` | Cycle or set appearance (also the bottom-right control or `Alt+T`) |
 | `share` / `install` | Share this page / Home Screen hint |
 

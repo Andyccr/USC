@@ -58,6 +58,7 @@
     ":bookmarks",
     ":about",
     ":star",
+    ":next",
     ":install",
     ":help"
   ];
@@ -102,6 +103,7 @@
     if (lower === "about") return { type: "about" };
     if (lower === "settings" || lower === "prefs") return { type: "settings" };
     if (lower === "resume" || lower === "continue") return { type: "resume" };
+    if (lower === "next") return { type: "next" };
     if (lower === "star") return { type: "bookmark", index: 0 };
     if (lower === "recents" || lower === "recent") return { type: "home" };
     if (lower === "font") return { type: "font", value: "show" };
@@ -281,10 +283,19 @@
     var session = readSession();
 
     function homeDocument() {
+      function withScroll(row) {
+        if (!row || !row.url) return row;
+        var copy = {};
+        for (var key in row) {
+          if (Object.prototype.hasOwnProperty.call(row, key)) copy[key] = row[key];
+        }
+        if (scrolls[row.url] != null) copy.scroll = scrolls[row.url];
+        return copy;
+      }
       return Browser.markdownToDocument(
         Library.homeMarkdown({
-          recents: session.recents,
-          last: session.last,
+          recents: (session.recents || []).map(withScroll),
+          last: withScroll(session.last),
           bookmarks: readBookmarks()
         }),
         Library.HOME
@@ -346,7 +357,9 @@
       session = Library.remember(session, {
         title: doc.title,
         url: doc.url,
-        via: doc.via
+        via: doc.via,
+        scroll: doc._scroll != null ? doc._scroll : scrolls[doc.url] || 0,
+        next: doc._next
       });
       writeSession(session);
     }
@@ -706,6 +719,14 @@
       current._scroll = ratio;
       scrolls[current.url] = ratio;
       persistScroll(current.url, ratio);
+      if (session && session.last && session.last.url === current.url) {
+        session.last.scroll = ratio;
+        var recents = session.recents || [];
+        for (var i = 0; i < recents.length; i++) {
+          if (recents[i] && recents[i].url === current.url) recents[i].scroll = ratio;
+        }
+        writeSession(session);
+      }
     }
 
     function restoreScroll() {
@@ -823,7 +844,11 @@
             page.appendChild(mark);
             sawMark = true;
           } else if (
-            (Library.isSurfaceUrl(documentModel.url) || Library.isSearchUrl(documentModel.url)) &&
+            (
+              Library.isSurfaceUrl(documentModel.url) ||
+              Library.isSearchUrl(documentModel.url) ||
+              Library.isTrailLabel(tok.v)
+            ) &&
             Library.isSectionLabel(tok.v)
           ) {
             var sec = doc.createElement("span");
@@ -1023,8 +1048,26 @@
       return documentModel;
     }
 
+    function attachTrail(documentModel) {
+      if (!documentModel || documentModel._trailed) return documentModel;
+      documentModel._trailed = true;
+      if (Library.isLocalHost(documentModel.url)) return documentModel;
+      if (
+        documentModel.via === "loading" ||
+        documentModel.via === "error" ||
+        documentModel.via === "image-link"
+      ) {
+        documentModel._next = [];
+        return documentModel;
+      }
+      var next = Library.pickNextLinks(documentModel, { recents: session.recents });
+      documentModel._next = next;
+      Library.appendNext(documentModel, next);
+      return documentModel;
+    }
+
     function showCached(abs, hit, stackNav) {
-      var documentModel = documentFromFetched(abs, hit);
+      var documentModel = attachTrail(documentFromFetched(abs, hit));
       applyImageMode(documentModel);
       setLoading(false);
       setCurrent(documentModel, stackNav);
@@ -1109,7 +1152,7 @@
         if (ticket !== going) return;
         clearTimeout(loadTimer);
         setLoading(false);
-        applyImageMode(documentModel);
+        applyImageMode(attachTrail(documentModel));
         setCurrent(documentModel, "replace");
       }
 
@@ -1377,6 +1420,18 @@
       }
       if (cmd.type === "resume") {
         resumeLast();
+        return;
+      }
+      if (cmd.type === "next") {
+        var trail = current && current._next;
+        if (!trail || !trail.length) {
+          trail = current ? Library.pickNextLinks(current, { recents: session.recents }) : [];
+        }
+        if (!trail.length) {
+          printMsg("no next", "err");
+          return;
+        }
+        go(trail[0].url, "push", trail[0].title);
         return;
       }
       if (cmd.type === "clear") {
